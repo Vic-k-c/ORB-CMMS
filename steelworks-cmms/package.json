@@ -1,0 +1,24 @@
+{
+  "name": "steelworks-cmms",
+  "version": "2.0.0",
+  "description": "Multi-tenant CMMS - machine registry, maintenance logging with file attachments, supervisor review, dashboard, branded PDF/Excel reports, and role-based accounts. PostgreSQL-backed.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "bcryptjs": "^2.4.3",
+    "express-session": "^1.18.0",
+    "multer": "^1.4.5-lts.1",
+    "exceljs": "^4.4.0",
+    "jimp": "^0.22.12"
+  },
+  "engines": {
+    "node": "20.18.0"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
