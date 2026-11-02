@@ -111,16 +111,23 @@ function requirePasswordConfirmation() {
 // ================= DB HELPERS =================
 // Postgres via 'pg' is fully async, unlike the old better-sqlite3 (synchronous)
 // version - every route handler in this file is now async and awaits these.
-async function dbGet(sql, params = []) {
+async function timedQuery(sql, params) {
+  const t0 = Date.now();
   const r = await db.pool.query(sql, params);
+  const ms = Date.now() - t0;
+  if (ms > 700) console.warn('SLOW QUERY ' + ms + ' ms: ' + String(sql).replace(/\s+/g, ' ').slice(0, 120));
+  return r;
+}
+async function dbGet(sql, params = []) {
+  const r = await timedQuery(sql, params);
   return r.rows[0] || null;
 }
 async function dbAll(sql, params = []) {
-  const r = await db.pool.query(sql, params);
+  const r = await timedQuery(sql, params);
   return r.rows;
 }
 async function dbRun(sql, params = []) {
-  return db.pool.query(sql, params);
+  return timedQuery(sql, params);
 }
 // Postgres returns COUNT(*)/BIGINT as a STRING (to avoid precision loss for
 // very large numbers) - unlike SQLite, which returned a plain JS number. Every
@@ -468,6 +475,16 @@ function sortMachinesByCategoryAndCode(list, deptKey = 'department', codeKey = '
 // machine). Optionally scoped to a single machineId (for the Machine
 // detail page) - in that case only per-machine rules (B, C, D) apply,
 // since A and E are inherently whole-plant/category comparisons.
+// The automatic findings take ~15 database round trips to work out, so the
+// org-wide result is reused for 60 seconds (the dashboard asks for it often).
+const findingsCache = new Map();
+async function computeFindingsCached(orgId) {
+  const hit = findingsCache.get(orgId);
+  if (hit && Date.now() - hit.t < 60000) return hit.data;
+  const data = await computeFindings(orgId, null);
+  findingsCache.set(orgId, { t: Date.now(), data });
+  return data;
+}
 async function computeFindings(organizationId, scopeMachineId) {
   const findings = [];
   const today = todayISO();
@@ -529,12 +546,12 @@ async function computeFindings(organizationId, scopeMachineId) {
     );
     const orgAvgHours = orgAvgRow.avg ? parseFloat(orgAvgRow.avg) : 8;
 
-    for (const dm of downMachines) {
+    const ruleCResults = await Promise.all(downMachines.map(async (dm) => {
       const lastBreakdown = await dbGet(
         "SELECT start_time, logged_at FROM logs WHERE organization_id = $1 AND machine_id = $2 AND log_type = 'Breakdown' ORDER BY logged_at DESC LIMIT 1",
         [organizationId, dm.id]
       );
-      if (!lastBreakdown) continue;
+      if (!lastBreakdown) return null;
       const startedAt = lastBreakdown.start_time ? new Date(lastBreakdown.start_time) : new Date(lastBreakdown.logged_at);
       const elapsedHours = (Date.now() - startedAt.getTime()) / 3600000;
 
@@ -547,14 +564,16 @@ async function computeFindings(organizationId, scopeMachineId) {
         : orgAvgHours;
 
       if (elapsedHours > baseline * 1.5 && elapsedHours > 4) {
-        findings.push({
+        return ({
           severity: 'High', machineId: dm.id,
           title: `${dm.name} (${dm.code}) has been down longer than usual`,
           detail: `Currently down for about ${round2(elapsedHours)} hours, versus a typical ${round2(baseline)}-hour repair for this machine.`,
           suggestedAction: 'Check whether this breakdown is stalled on parts, approval, or technician availability.'
         });
       }
-    }
+      return null;
+    }));
+    ruleCResults.filter(Boolean).forEach(f => findings.push(f));
   }
 
   // ---- Rule D: overdue PM machines ----
@@ -1464,6 +1483,18 @@ async function notifyManagers(orgId, { type, title, body, logId, machineId, exce
     await createNotification({ orgId, userId: uid, type, title, body, logId, machineId, dedupeKey });
   }
 }
+
+// Open /api/db-latency in the browser (while logged in) to see how long one
+// trip to the database takes. Under ~30 ms is excellent; over ~200 ms means
+// the app and the database are far apart (different regions).
+app.get('/api/db-latency', async (req, res) => {
+  try {
+    const times = [];
+    for (let i = 0; i < 6; i++) { const t0 = Date.now(); await db.pool.query('SELECT 1'); times.push(Date.now() - t0); }
+    const t1 = Date.now(); await db.pool.query('SELECT COUNT(*) FROM machines'); const countMs = Date.now() - t1;
+    res.json({ selectOneMs: times, firstIncludesConnecting: true, countMachinesMs: countMs, note: 'Later numbers = one round trip to the database.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 app.get('/api/notifications', async (req, res) => {
   try {
@@ -2527,31 +2558,56 @@ app.get('/api/dashboard', async (req, res) => {
     const weekAgoStart = addDays(today, -6) + 'T00:00:00.000Z';
     const monthPrefix = today.slice(0, 7);
 
-    const pmDueSoonRow = await dbGet(`
-      SELECT COUNT(*) as c FROM machines
-      WHERE organization_id = $1 AND next_pm_date IS NOT NULL AND next_pm_date != '' AND next_pm_date BETWEEN $2 AND $3
-    `, [orgId, today, weekAhead]);
+    // All the independent queries start together instead of one after the
+    // other - each one costs a network round trip to the database, so doing
+    // them in sequence made the dashboard crawl whenever the link was slow.
+    const [
+      pmDueSoonRow, totalMachinesRow, downRows, openDownRows, logsThisMonthRow, pendingLogsRow,
+      awaitingReviewRow, trendRows, compliance, recentRows, attentionRows, findings
+    ] = await Promise.all([
+      dbGet(`
+        SELECT COUNT(*) as c FROM machines
+        WHERE organization_id = $1 AND next_pm_date IS NOT NULL AND next_pm_date != '' AND next_pm_date BETWEEN $2 AND $3
+      `, [orgId, today, weekAhead]),
+      dbGet('SELECT COUNT(*) as c FROM machines WHERE organization_id = $1', [orgId]),
+      dbAll("SELECT * FROM machines WHERE organization_id = $1 AND status = 'Down'", [orgId]),
+      dbAll("SELECT id, machine_id, reported_by, priority, findings, start_time, logged_at FROM logs WHERE organization_id = $1 AND log_type = 'Breakdown' AND status = 'Pending' AND (end_time IS NULL OR end_time = '') ORDER BY logged_at ASC", [orgId]),
+      dbGet('SELECT COUNT(*) as c FROM logs WHERE organization_id = $1 AND LEFT(logged_at,7) = $2', [orgId, monthPrefix]),
+      dbGet("SELECT COUNT(*) as c FROM logs WHERE organization_id = $1 AND status = 'Pending'", [orgId]),
+      dbGet("SELECT COUNT(*) as c FROM logs WHERE organization_id = $1 AND status = 'Completed'", [orgId]),
+      dbAll(`
+        SELECT LEFT(logged_at,10) as day, log_type, COUNT(*) as cnt
+        FROM logs WHERE organization_id = $1 AND logged_at >= $2 GROUP BY day, log_type
+      `, [orgId, weekAgoStart]),
+      dbGet(`
+        SELECT
+          SUM(CASE WHEN next_pm_date IS NOT NULL AND next_pm_date != '' AND next_pm_date < $1 THEN 1 ELSE 0 END) as overdue,
+          SUM(CASE WHEN next_pm_date IS NOT NULL AND next_pm_date != '' AND next_pm_date >= $1 THEN 1 ELSE 0 END) as onschedule
+        FROM machines WHERE organization_id = $2
+      `, [today, orgId]),
+      dbAll(`
+        SELECT l.*, m.name as machine_name, m.code as machine_code, m.department as machine_department, m.location as machine_location
+        FROM logs l JOIN machines m ON m.id = l.machine_id
+        WHERE l.organization_id = $1
+        ORDER BY l.logged_at DESC LIMIT 5
+      `, [orgId]),
+      dbAll(`
+        SELECT * FROM machines
+        WHERE organization_id = $1 AND (status != 'Running' OR (next_pm_date IS NOT NULL AND next_pm_date != '' AND next_pm_date < $2))
+        ORDER BY (status != 'Running') DESC, next_pm_date ASC
+        LIMIT 6
+      `, [orgId, today]),
+      computeFindingsCached(orgId)
+    ]);
 
-    const totalMachinesRow = await dbGet('SELECT COUNT(*) as c FROM machines WHERE organization_id = $1', [orgId]);
-    const machinesDownList = sortMachinesByCategoryAndCode(await dbAll(
-      "SELECT * FROM machines WHERE organization_id = $1 AND status = 'Down'", [orgId]
-    )).map(toMachineJSON);
+    const machinesDownList = sortMachinesByCategoryAndCode(downRows).map(toMachineJSON);
     // Attach the open (not yet closed) breakdown log, if any, to each down machine
-    const openDownRows = await dbAll("SELECT id, machine_id, reported_by, priority, findings, start_time, logged_at FROM logs WHERE organization_id = $1 AND log_type = 'Breakdown' AND status = 'Pending' AND (end_time IS NULL OR end_time = '') ORDER BY logged_at ASC", [orgId]);
     const openByMachine = {};
     openDownRows.forEach(r => { openByMachine[r.machine_id] = r; });
     machinesDownList.forEach(m => {
       const o = openByMachine[m.id];
       if (o) m.openDowntime = { logId: o.id, since: o.start_time || o.logged_at, reportedBy: o.reported_by || '', priority: o.priority || '', findings: o.findings || '' };
     });
-    const logsThisMonthRow = await dbGet('SELECT COUNT(*) as c FROM logs WHERE organization_id = $1 AND LEFT(logged_at,7) = $2', [orgId, monthPrefix]);
-    const pendingLogsRow = await dbGet("SELECT COUNT(*) as c FROM logs WHERE organization_id = $1 AND status = 'Pending'", [orgId]);
-    const awaitingReviewRow = await dbGet("SELECT COUNT(*) as c FROM logs WHERE organization_id = $1 AND status = 'Completed'", [orgId]);
-
-    const trendRows = await dbAll(`
-      SELECT LEFT(logged_at,10) as day, log_type, COUNT(*) as cnt
-      FROM logs WHERE organization_id = $1 AND logged_at >= $2 GROUP BY day, log_type
-    `, [orgId, weekAgoStart]);
 
     const weeklyTrends = [];
     for (let i = 6; i >= 0; i--) {
@@ -2560,29 +2616,8 @@ app.get('/api/dashboard', async (req, res) => {
       const bd = trendRows.find(r => r.day === day && r.log_type === 'Breakdown');
       weeklyTrends.push({ day, preventive: pv ? toInt(pv.cnt) : 0, breakdown: bd ? toInt(bd.cnt) : 0 });
     }
-
-    const compliance = await dbGet(`
-      SELECT
-        SUM(CASE WHEN next_pm_date IS NOT NULL AND next_pm_date != '' AND next_pm_date < $1 THEN 1 ELSE 0 END) as overdue,
-        SUM(CASE WHEN next_pm_date IS NOT NULL AND next_pm_date != '' AND next_pm_date >= $1 THEN 1 ELSE 0 END) as onschedule
-      FROM machines WHERE organization_id = $2
-    `, [today, orgId]);
-
-    const recentLogs = (await dbAll(`
-      SELECT l.*, m.name as machine_name, m.code as machine_code, m.department as machine_department, m.location as machine_location
-      FROM logs l JOIN machines m ON m.id = l.machine_id
-      WHERE l.organization_id = $1
-      ORDER BY l.logged_at DESC LIMIT 5
-    `, [orgId])).map(toLogJSON);
-
-    const machinesAttention = (await dbAll(`
-      SELECT * FROM machines
-      WHERE organization_id = $1 AND (status != 'Running' OR (next_pm_date IS NOT NULL AND next_pm_date != '' AND next_pm_date < $2))
-      ORDER BY (status != 'Running') DESC, next_pm_date ASC
-      LIMIT 6
-    `, [orgId, today])).map(toMachineJSON);
-
-    const findings = await computeFindings(orgId, null);
+    const recentLogs = recentRows.map(toLogJSON);
+    const machinesAttention = attentionRows.map(toMachineJSON);
 
     res.json({
       pmDueSoon: toInt(pmDueSoonRow.c),
