@@ -223,6 +223,7 @@
         <button data-view="admin" id="adminNavBtn">Admin</button>
       </nav>
       <div class="auth-buttons">
+        <button type="button" class="bell-btn" id="bellBtn" title="Notifications" aria-label="Notifications" onclick="toggleNotifPanel(event)">&#128276;<span class="bell-badge" id="bellBadge" style="display:none;">0</span></button>
         <button type="button" class="user-chip user-chip-btn" id="userChip" title="Settings" onclick="openSettings()"></button>
         <button class="btn-outline" onclick="logout()">Log Out</button>
       </div>
@@ -233,7 +234,10 @@
   <section class="view active" id="view-dashboard">
     <div class="page-head">
       <h2 class="page-title">Dashboard Overview</h2>
-      <button class="btn-primary" onclick="openLogForm()" id="dashboardNewLogBtn">Submit New Log</button>
+      <div class="page-head-actions">
+        <button class="btn-alert" onclick="openDowntimeForm()" id="dashboardReportDownBtn">&#9888; Report Breakdown</button>
+        <button class="btn-primary" onclick="openLogForm()" id="dashboardNewLogBtn">Submit New Log</button>
+      </div>
     </div>
 
     <div class="stat-grid">
@@ -399,7 +403,10 @@
   <section class="view" id="view-machines">
     <div class="page-head">
       <h2 class="page-title">Machine Management</h2>
-      <button class="btn-primary" id="addMachineBtn" onclick="openMachineForm()">+ Add New Machine</button>
+      <div class="page-head-actions">
+        <button class="btn-ghost" id="downloadMachinesBtn" onclick="downloadMachines()">&#11015; Download machines</button>
+        <button class="btn-primary" id="addMachineBtn" onclick="openMachineForm()">+ Add New Machine</button>
+      </div>
     </div>
 
     <div class="filters-toggle-row">
@@ -960,5 +967,37 @@
 </div>
 <script src="/app.js"></script>
 <script src="/kanban.js"></script>
+<!-- ============ NOTIFICATIONS PANEL ============ -->
+<div class="notif-panel" id="notifPanel" style="display:none;">
+  <div class="notif-head"><strong>Notifications</strong><button type="button" class="btn-ghost" onclick="markAllNotifsRead()">Mark all read</button></div>
+  <div id="notifList"><div class="notif-empty">Loading&hellip;</div></div>
+</div>
+<!-- ============ REPORT BREAKDOWN (quick) ============ -->
+<div class="dt-overlay" id="downtimeOverlay" style="display:none;" onclick="if(event.target===this)closeDowntimeForm()">
+  <form class="dt-card" id="downtimeForm" autocomplete="off">
+    <h3>Report Breakdown</h3>
+    <p class="dt-hint">Machine just stopped? Report it now &mdash; the supervisors are alerted straight away and the repair details can be added later.</p>
+    <label for="dtMachine">Machine</label>
+    <input id="dtMachine" list="dtMachineList" placeholder="Type a machine name or code..." required>
+    <datalist id="dtMachineList"></datalist>
+    <label for="dtSymptom">What happened?</label>
+    <textarea id="dtSymptom" rows="3" placeholder="e.g. Hydraulic oil leaking at the stripper lock" required></textarea>
+    <div class="dt-row">
+      <div><label for="dtReportedBy">Reported by</label><input id="dtReportedBy" placeholder="Operator / supervisor"></div>
+      <div><label for="dtPriority">Priority</label><select id="dtPriority"><option>High</option><option selected>Medium</option><option>Low</option></select></div>
+    </div>
+    <label for="dtPhotos">Photo <span class="label-note">(optional &mdash; up to 3)</span></label>
+    <input type="file" id="dtPhotos" accept="image/*" multiple>
+    <div class="dt-row">
+      <div><label for="dtDate">Stopped on</label><input type="date" id="dtDate"></div>
+      <div><label for="dtTime">At</label><input type="time" id="dtTime"></div>
+    </div>
+    <div class="dt-error" id="dtError" style="display:none;"></div>
+    <div class="dt-actions">
+      <button type="submit" class="btn-alert" id="dtSubmit">Report Breakdown</button>
+      <button type="button" class="btn-ghost" onclick="closeDowntimeForm()">Cancel</button>
+    </div>
+  </form>
+</div>
 </body>
-</html>
+        </html>
