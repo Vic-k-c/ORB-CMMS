@@ -17,7 +17,11 @@ const useSSL = process.env.PGSSL === 'true' || process.env.PGSSL === '1' || auto
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: useSSL ? { rejectUnauthorized: false } : false
+  ssl: useSSL ? { rejectUnauthorized: false } : false,
+  max: 10,
+  keepAlive: true,                 // stops idle connections to a remote DB going stale
+  idleTimeoutMillis: 120000,       // keep connections warm longer: opening a new SSL connection to a far-away DB is slow
+  connectionTimeoutMillis: 20000
 });
 
 pool.on('error', (err) => {
