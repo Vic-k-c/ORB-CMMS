@@ -297,6 +297,7 @@ function hasPermission(perm){ return currentUser && Array.isArray(currentUser.pe
 function canManageMachines(){ return hasPermission('manage_machines'); }
 function canManageLogs(){ return hasPermission('manage_logs'); }
 function canSubmitLogs(){ return hasPermission('submit_logs'); }
+function canReportBreakdown(){ return hasPermission('report_breakdown') || hasPermission('submit_logs'); }
 function canViewReports(){ return hasPermission('view_reports'); }
 // isManagement() stays role-name-based, not permission-based: user
 // management and organization branding are deliberately kept built-in-role
@@ -360,6 +361,9 @@ async function showAppShell(){
   document.getElementById('logsStaffBtn').style.display = (isManagement() || currentUser.role==='Maintenance Supervisor') ? '' : 'none';
   document.getElementById('kanbanNavBtn').style.display = (currentUser && currentUser.boardsAccess) ? '' : 'none';
   document.getElementById('dashboardNewLogBtn').style.display = canSubmitLogs() ? '' : 'none';
+  document.getElementById('dashboardReportDownBtn').style.display = canReportBreakdown() ? '' : 'none';
+  document.getElementById('downloadMachinesBtn').style.display = hasPermission('view_machines') ? '' : 'none';
+  startNotifPolling();
   document.getElementById('logsNewLogBtn').style.display = canSubmitLogs() ? '' : 'none';
   await loadBranding();
   if(ensureOrgInstallTags(brandingCache && brandingCache.orgCode)) return;
@@ -532,6 +536,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
 async function logout(){
   try{ await fetch(API+'/auth/logout', {method:'POST', credentials:'same-origin'}); }catch(e){}
   stopIdleTracking();
+  stopNotifPolling();
   currentUser = null;
   brandingCache = null;
   logoDataUrlCache = undefined;
@@ -901,14 +906,159 @@ function renderMachinesDownList(){
     el.innerHTML = '<div class="empty-state"><div class="big">No machines are down right now</div></div>';
     return;
   }
-  el.innerHTML = groupByCategory(sortMachines(list), 'department', m => `
+  el.innerHTML = groupByCategory(sortMachines(list), 'department', m => {
+    const o = m.openDowntime;
+    return `
     <div class="recent-log-row clickable" onclick="openMachineDetail('${m.id}')">
       <div>
         <b>${escapeHtml(m.code)}</b> &middot; ${escapeHtml(m.name)}
         <div style="color:var(--grey);font-size:12px;margin-top:2px;">${escapeHtml(m.location||'\u2014')}</div>
+        ${o ? `<div class="down-since" data-since="${escapeHtml(o.since)}">${downSinceText(o.since)}</div>
+        ${o.findings ? `<div class="down-reason">${escapeHtml(o.findings)}</div>` : ''}
+        ${canManageLogs() ? `<div class="down-row-actions"><button class="btn-primary small" onclick="event.stopPropagation();finishDowntimeJob('${o.logId}')">Finish job</button></div>` : ''}` : ''}
       </div>
-    </div>`, (d,n) => `<div class="group-head">${escapeHtml(d)} <span>${n} down</span></div>`);
+    </div>`;
+  }, (d,n) => `<div class="group-head">${escapeHtml(d)} <span>${n} down</span></div>`);
 }
+function downSinceText(iso){
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime())/60000));
+  const h = Math.floor(mins/60), m = mins%60;
+  return 'Down since ' + fmtDateTime(iso) + ' \u00b7 ' + (h>0 ? h+' h ' : '') + m + ' min';
+}
+setInterval(()=>{ document.querySelectorAll('.down-since[data-since]').forEach(el=>{ el.textContent = downSinceText(el.dataset.since); }); }, 60000);
+
+// ---- Report Breakdown (quick) ----
+async function openDowntimeForm(){
+  await loadMachinesCache();
+  const dl = document.getElementById('dtMachineList');
+  dl.innerHTML = machinesCache.map(m=>`<option value="${escapeHtml(m.name+' ('+m.code+')')}"></option>`).join('');
+  document.getElementById('downtimeForm').reset();
+  document.getElementById('dtDate').value = nowLocalDateStr();
+  document.getElementById('dtTime').value = nowLocalTimeStr();
+  document.getElementById('dtReportedBy').value = (currentUser && currentUser.name) || '';
+  document.getElementById('dtError').style.display = 'none';
+  document.getElementById('downtimeOverlay').style.display = 'flex';
+}
+function closeDowntimeForm(){ document.getElementById('downtimeOverlay').style.display = 'none'; }
+window.openDowntimeForm = openDowntimeForm;
+window.closeDowntimeForm = closeDowntimeForm;
+document.getElementById('downtimeForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const err = document.getElementById('dtError');
+  const typed = document.getElementById('dtMachine').value.trim().toLowerCase();
+  const m = machinesCache.find(x => (x.name+' ('+x.code+')').toLowerCase() === typed) || machinesCache.find(x => x.code.toLowerCase() === typed);
+  if(!m){ err.textContent = 'Pick the machine from the list that appears as you type.'; err.style.display = 'block'; return; }
+  const startISO = localDateTimeToISO(document.getElementById('dtDate').value, document.getElementById('dtTime').value);
+  const btn = document.getElementById('dtSubmit'); btn.disabled = true;
+  try{
+    const created = await apiPost('/downtime-reports', {
+      machineId: m.id,
+      symptom: document.getElementById('dtSymptom').value.trim(),
+      reportedBy: document.getElementById('dtReportedBy').value.trim(),
+      priority: document.getElementById('dtPriority').value,
+      startTime: startISO
+    });
+    // Optional photos: attached to the new breakdown log. A failed upload
+    // never undoes the report - the machine is already flagged down.
+    const photoInput = document.getElementById('dtPhotos');
+    let photoNote = '';
+    if(photoInput.files && photoInput.files.length){
+      try{
+        const fd = new FormData();
+        Array.from(photoInput.files).slice(0,3).forEach(f=>fd.append('files', f));
+        const up = await fetch(API+'/logs/'+created.id+'/attachments', {method:'POST', credentials:'same-origin', body: fd});
+        if(!up.ok) photoNote = ' (photo could not be attached)';
+      }catch(pe){ photoNote = ' (photo could not be attached)'; }
+    }
+    closeDowntimeForm();
+    showToast(m.name + ' reported down' + photoNote);
+    refreshNotifs();
+    machinesCache = []; // refresh statuses on next use
+    loadDashboard();
+  }catch(ex){ err.textContent = ex.message; err.style.display = 'block'; }
+  finally{ btn.disabled = false; }
+});
+
+// ---- Download machines (Excel) ----
+function downloadMachines(){
+  const params = new URLSearchParams();
+  if(machineState.category && machineState.category !== 'All') params.set('department', machineState.category);
+  const st = document.getElementById('machineStatusFilter');
+  if(st && st.value) params.set('status', st.value);
+  const q = params.toString();
+  window.location.href = API + '/machines-export' + (q ? '?' + q : '');
+}
+window.downloadMachines = downloadMachines;
+
+// ---- Notifications bell ----
+let notifTimer = null;
+let lastUnreadCount = null;
+function startNotifPolling(){
+  stopNotifPolling();
+  refreshNotifs();
+  notifTimer = setInterval(refreshNotifs, 45000);
+}
+function stopNotifPolling(){ if(notifTimer){ clearInterval(notifTimer); notifTimer = null; } lastUnreadCount = null; }
+async function refreshNotifs(){
+  if(!currentUser) return;
+  try{
+    const data = await apiGet('/notifications');
+    const badge = document.getElementById('bellBadge');
+    badge.textContent = data.unread > 99 ? '99+' : String(data.unread);
+    badge.style.display = data.unread > 0 ? '' : 'none';
+    if(lastUnreadCount !== null && data.unread > lastUnreadCount){
+      const newest = data.items.find(i=>!i.read);
+      if(newest) showToast(newest.title);
+    }
+    lastUnreadCount = data.unread;
+    if(document.getElementById('notifPanel').style.display !== 'none') renderNotifs(data.items);
+  }catch(e){ /* quiet: the bell must never disturb the page */ }
+}
+function renderNotifs(items){
+  const el = document.getElementById('notifList');
+  if(!items.length){ el.innerHTML = '<div class="notif-empty">Nothing yet.</div>'; return; }
+  const icon = {breakdown_reported:'⚠️', breakdown_overdue:'⏰', breakdown_closed:'✅', pm_due:'🛠️'};
+  el.innerHTML = items.map(n=>`
+    <div class="notif-item ${n.read?'':'unread'}" onclick="openNotif('${n.id}','${n.type}')">
+      <div class="notif-ico">${icon[n.type]||'🔔'}</div>
+      <div class="notif-txt"><div class="notif-title">${escapeHtml(n.title)}</div>
+        ${n.body?`<div class="notif-body">${escapeHtml(n.body)}</div>`:''}
+        <div class="notif-time">${escapeHtml(fmtDateTime(n.createdAt))}</div></div>
+    </div>`).join('');
+}
+async function toggleNotifPanel(ev){
+  if(ev) ev.stopPropagation();
+  const p = document.getElementById('notifPanel');
+  if(p.style.display === 'none'){
+    p.style.display = 'block';
+    try{ const data = await apiGet('/notifications'); renderNotifs(data.items); }catch(e){ document.getElementById('notifList').innerHTML = '<div class="notif-empty">Could not load.</div>'; }
+  } else { p.style.display = 'none'; }
+}
+async function openNotif(id, type){
+  try{ await apiPost('/notifications/read', {ids:[id]}); }catch(e){}
+  document.getElementById('notifPanel').style.display = 'none';
+  switchView(type === 'pm_due' ? 'machines' : 'dashboard');
+  refreshNotifs();
+}
+async function markAllNotifsRead(){
+  try{ await apiPost('/notifications/read', {}); }catch(e){}
+  try{ const data = await apiGet('/notifications'); renderNotifs(data.items); }catch(e){}
+  refreshNotifs();
+}
+window.toggleNotifPanel = toggleNotifPanel; window.openNotif = openNotif; window.markAllNotifsRead = markAllNotifsRead;
+document.addEventListener('click', (e)=>{
+  const p = document.getElementById('notifPanel');
+  if(p && p.style.display !== 'none' && !p.contains(e.target) && e.target.id !== 'bellBtn') p.style.display = 'none';
+});
+
+// Opens the open breakdown log of a down machine for completing the job.
+async function finishDowntimeJob(logId){
+  try{
+    logCache[logId] = await apiGet('/logs/'+logId);
+    await editLogForm(logId, {closing:true});
+  }catch(e){ showToast('Could not open the job: '+e.message); }
+}
+window.finishDowntimeJob = finishDowntimeJob;
 function toggleMachinesDownList(){
   const panel = document.getElementById('machinesDownPanel');
   panel.style.display = '';
@@ -1761,7 +1911,8 @@ window.openLogForm = openLogForm;
 // PDF/Excel exports used to use everywhere (End = logged_at, Start = End
 // minus downtime hours) - editing and resaving such a log switches it over
 // to real Start/End times going forward.
-async function editLogForm(logId){
+async function editLogForm(logId, opts){
+  opts = opts || {};
   if(!canManageLogs()){ showToast('Only supervisors and management can edit logs'); return; }
   const l = logCache[logId];
   if(!l){ showToast('Log details not available to edit'); return; }
@@ -1789,9 +1940,12 @@ async function editLogForm(logId){
   document.getElementById('logActions').value = l.actionsTaken || '';
   document.getElementById('logParts').value = l.partsUsed || '';
 
+  const isOpenJob = !!(l.startTime && !l.endTime && l.status === 'Pending');
   let startIso, endIso;
   if(l.startTime && l.endTime){
     startIso = l.startTime; endIso = l.endTime;
+  }else if(isOpenJob){
+    startIso = l.startTime; endIso = new Date().toISOString();
   }else{
     endIso = l.loggedAt || new Date().toISOString();
     startIso = new Date(new Date(endIso).getTime() - (l.downtimeHours || 0) * 3600000).toISOString();
@@ -1818,13 +1972,15 @@ async function editLogForm(logId){
     statusSelect.disabled = true;
     document.getElementById('logStatusLockedNote').style.display = 'block';
   }else{
-    statusSelect.value = l.status;
+    statusSelect.value = (isOpenJob && opts.closing) ? 'Completed' : l.status;
     statusSelect.disabled = false;
     document.getElementById('logStatusLockedNote').style.display = 'none';
   }
 
   document.getElementById('logFormTitle').textContent = 'Edit Maintenance Log';
-  document.getElementById('logFormHint').textContent = 'Correcting details on an already-submitted log.';
+  document.getElementById('logFormHint').textContent = isOpenJob
+    ? 'Machine reported down. Add what was done and who worked on it, then set status to Completed to put it back to Running.'
+    : 'Correcting details on an already-submitted log.';
   document.getElementById('logFormSubmit').textContent = 'Save Changes';
   document.getElementById('logAttachmentsField').style.display = 'none';
   document.getElementById('logFormDeleteBtn').style.display = canManageLogs() ? '' : 'none';
@@ -1846,7 +2002,9 @@ document.getElementById('logForm').addEventListener('submit', async (e)=>{
   if(!startISO || !endISO){ showToast('Fill in both Start and End date/time'); return; }
   if(new Date(endISO) <= new Date(startISO)){ showToast('End time must be after start time'); return; }
 
-  if(selectedStaffIds.size===0 && !document.getElementById('logTech').value.trim()){ showToast('Select at least one person who worked on the task'); return; }
+  const _ed = editingLogId ? logCache[editingLogId] : null;
+  const keepOpen = !!(_ed && _ed.startTime && !_ed.endTime && _ed.status === 'Pending' && document.getElementById('logStatus').value === 'Pending');
+  if(!keepOpen && selectedStaffIds.size===0 && !document.getElementById('logTech').value.trim()){ showToast('Select at least one person who worked on the task'); return; }
   const submitBtn = e.target.querySelector('button[type="submit"]');
   submitBtn.disabled = true;
   try{
@@ -1865,6 +2023,11 @@ document.getElementById('logForm').addEventListener('submit', async (e)=>{
       status: document.getElementById('logStatus').disabled ? undefined : document.getElementById('logStatus').value
     };
 
+    if(keepOpen){
+      // still in progress: save notes only, leave the job open (no end time yet)
+      delete payload.startTime; delete payload.endTime;
+      if(selectedStaffIds.size===0 && !payload.otherNames){ delete payload.staffIds; delete payload.otherNames; }
+    }
     if(editingLogId){
       await apiPut('/logs/'+editingLogId, payload);
       showToast('Log updated');
@@ -2300,7 +2463,7 @@ function populateRoleSelect(selectedValue){
 
 const PERMISSION_LABELS = {
   view_dashboard: 'View Dashboard', view_machines: 'View Machines', manage_machines: 'Manage Machines',
-  submit_logs: 'Submit Logs', manage_logs: 'Manage Logs', view_reports: 'View Reports',
+  submit_logs: 'Submit Logs', manage_logs: 'Manage Logs', view_reports: 'View Reports', report_breakdown: 'Report Breakdown',
   manage_users: 'Manage Users', manage_branding: 'Manage Branding'
 };
 
@@ -3029,4 +3192,4 @@ if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(()=>{});
   });
-}
+      }
