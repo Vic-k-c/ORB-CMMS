@@ -362,7 +362,7 @@ async function showAppShell(){
   document.getElementById('kanbanNavBtn').style.display = (currentUser && currentUser.boardsAccess) ? '' : 'none';
   document.getElementById('dashboardNewLogBtn').style.display = canSubmitLogs() ? '' : 'none';
   document.getElementById('dashboardReportDownBtn').style.display = canReportBreakdown() ? '' : 'none';
-  document.getElementById('downloadMachinesBtn').style.display = hasPermission('view_machines') ? '' : 'none';
+  { const dmb = document.getElementById('downloadMachinesBtn'); if(dmb) dmb.style.display = hasPermission('view_machines') ? '' : 'none'; }
   startNotifPolling();
   document.getElementById('logsNewLogBtn').style.display = canSubmitLogs() ? '' : 'none';
   await loadBranding();
@@ -942,7 +942,9 @@ async function openDowntimeForm(){
 function closeDowntimeForm(){ document.getElementById('downtimeOverlay').style.display = 'none'; }
 window.openDowntimeForm = openDowntimeForm;
 window.closeDowntimeForm = closeDowntimeForm;
-document.getElementById('downtimeForm').addEventListener('submit', async (e)=>{
+// Delegated on purpose: works even if the form is later in the page than this script.
+document.addEventListener('submit', async (e)=>{
+  if(!e.target || e.target.id !== 'downtimeForm') return;
   e.preventDefault();
   const err = document.getElementById('dtError');
   const typed = document.getElementById('dtMachine').value.trim().toLowerCase();
@@ -1004,6 +1006,7 @@ async function refreshNotifs(){
   try{
     const data = await apiGet('/notifications');
     const badge = document.getElementById('bellBadge');
+    if(!badge) return;
     badge.textContent = data.unread > 99 ? '99+' : String(data.unread);
     badge.style.display = data.unread > 0 ? '' : 'none';
     if(lastUnreadCount !== null && data.unread > lastUnreadCount){
@@ -1011,7 +1014,8 @@ async function refreshNotifs(){
       if(newest) showToast(newest.title);
     }
     lastUnreadCount = data.unread;
-    if(document.getElementById('notifPanel').style.display !== 'none') renderNotifs(data.items);
+    const np = document.getElementById('notifPanel');
+    if(np && np.style.display !== 'none') renderNotifs(data.items);
   }catch(e){ /* quiet: the bell must never disturb the page */ }
 }
 function renderNotifs(items){
@@ -3192,4 +3196,4 @@ if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(()=>{});
   });
-      }
+}
