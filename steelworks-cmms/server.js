@@ -32,7 +32,8 @@ const FULL_ADMIN_ROLES = ['Management', 'Maintenance HOD'];
 const PERMISSIONS = [
   'view_dashboard', 'view_machines', 'manage_machines',
   'submit_logs', 'manage_logs', 'view_reports',
-  'manage_users', 'manage_branding'
+  'manage_users', 'manage_branding',
+  'report_breakdown'   // flag a machine as down (operators etc.) - no log editing rights
 ];
 
 // What each built-in role has always been able to do, expressed as
@@ -43,10 +44,10 @@ const PERMISSIONS = [
 function builtInRolePermissions(role) {
   if (FULL_ADMIN_ROLES.includes(role)) return [...PERMISSIONS]; // everything
   if (role === 'Maintenance Supervisor') {
-    return ['view_dashboard', 'view_machines', 'manage_machines', 'submit_logs', 'manage_logs', 'view_reports'];
+    return ['view_dashboard', 'view_machines', 'manage_machines', 'submit_logs', 'manage_logs', 'view_reports', 'report_breakdown'];
   }
   if (role === 'Technician') {
-    return ['view_dashboard', 'view_machines', 'submit_logs', 'view_reports'];
+    return ['view_dashboard', 'view_machines', 'submit_logs', 'view_reports', 'report_breakdown'];
   }
   return [];
 }
@@ -66,6 +67,17 @@ async function getUserPermissions(sessionUser) {
 
 // Like requireRole, but checks a permission rather than a role name -
 // works transparently for both built-in and custom roles.
+function requireAnyPermission(...needed) {
+  return async (req, res, next) => {
+    if (!req.session.user) return res.status(401).json({ error: 'Not authenticated' });
+    try {
+      const perms = await getUserPermissions(req.session.user);
+      if (!needed.some(p => perms.includes(p))) return res.status(403).json({ error: 'Insufficient permissions' });
+      next();
+    } catch (e) { res.status(500).json({ error: 'Permission check failed: ' + e.message }); }
+  };
+}
+
 function requirePermission(permission) {
   return async (req, res, next) => {
     if (!req.session.user) return res.status(401).json({ error: 'Not authenticated' });
@@ -1425,6 +1437,143 @@ app.delete('/api/users/:id', requireRole(...FULL_ADMIN_ROLES), async (req, res) 
 
 // ================= MACHINES (own org only) =================
 
+
+// ================= NOTIFICATIONS (in-app) =================
+// One row per recipient. Managers = anyone whose role has manage_logs
+// (Maintenance Supervisor, HOD, Management and custom roles with that right).
+async function createNotification({ orgId, userId, type, title, body, logId, machineId, dedupeKey }) {
+  await dbRun(
+    `INSERT INTO notifications (id, organization_id, user_id, type, title, body, log_id, machine_id, dedupe_key, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`,
+    [genId('NTF'), orgId, userId, type, title, body || '', logId || null, machineId || null, dedupeKey || null, nowISO()]
+  );
+}
+async function managerUserIds(orgId) {
+  const users = await dbAll('SELECT id, role, custom_role_id FROM users WHERE organization_id = $1', [orgId]);
+  const out = [];
+  for (const u of users) {
+    const perms = await getUserPermissions({ role: u.role, customRoleId: u.custom_role_id });
+    if (perms.includes('manage_logs')) out.push(u.id);
+  }
+  return out;
+}
+async function notifyManagers(orgId, { type, title, body, logId, machineId, exceptUserId, alsoExcept, dedupeKey }) {
+  const ids = await managerUserIds(orgId);
+  for (const uid of ids) {
+    if (uid === exceptUserId || (alsoExcept && uid === alsoExcept)) continue;
+    await createNotification({ orgId, userId: uid, type, title, body, logId, machineId, dedupeKey });
+  }
+}
+
+app.get('/api/notifications', async (req, res) => {
+  try {
+    const rows = await dbAll(
+      'SELECT id, type, title, body, log_id, machine_id, created_at, read_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 40',
+      [req.session.user.id]);
+    const unread = await dbGet('SELECT COUNT(*) as c FROM notifications WHERE user_id = $1 AND read_at IS NULL', [req.session.user.id]);
+    res.json({
+      unread: toInt(unread.c),
+      items: rows.map(r => ({ id: r.id, type: r.type, title: r.title, body: r.body, logId: r.log_id, machineId: r.machine_id, createdAt: r.created_at, read: !!r.read_at }))
+    });
+  } catch (e) { res.status(500).json({ error: 'Could not load notifications: ' + e.message }); }
+});
+app.post('/api/notifications/read', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body.ids) ? req.body.ids.map(String) : null;
+    if (ids && ids.length) {
+      await dbRun('UPDATE notifications SET read_at = $1 WHERE user_id = $2 AND read_at IS NULL AND id = ANY($3)', [nowISO(), req.session.user.id, ids]);
+    } else {
+      await dbRun('UPDATE notifications SET read_at = $1 WHERE user_id = $2 AND read_at IS NULL', [nowISO(), req.session.user.id]);
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: 'Could not update notifications: ' + e.message }); }
+});
+
+// Background reminders, checked every 10 minutes:
+//  - a machine reported down and still not repaired after 2 hours (re-sent every 4 h)
+//  - a machine whose next PM date is today or already past (once per date)
+async function runReminders() {
+  try {
+    const open = await dbAll(
+      `SELECT l.id, l.organization_id, l.machine_id, l.start_time, l.logged_at, m.name, m.code
+       FROM logs l JOIN machines m ON m.id = l.machine_id
+       WHERE l.log_type = 'Breakdown' AND l.status = 'Pending' AND (l.end_time IS NULL OR l.end_time = '')`);
+    for (const l of open) {
+      const since = new Date(l.start_time || l.logged_at).getTime();
+      if (isNaN(since)) continue;
+      const hours = (Date.now() - since) / 3600000;
+      if (hours < 2) continue;
+      const slot = Math.floor((hours - 2) / 4);   // 0 at 2h, 1 at 6h, 2 at 10h ...
+      await notifyManagers(l.organization_id, {
+        type: 'breakdown_overdue',
+        title: l.name + ' (' + l.code + ') still down',
+        body: 'Down for about ' + Math.floor(hours) + ' hours and the job is not closed yet.',
+        logId: l.id, machineId: l.machine_id, dedupeKey: 'overdue:' + l.id + ':' + slot
+      });
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const pm = await dbAll(
+      `SELECT id, organization_id, name, code, next_pm_date FROM machines
+       WHERE next_pm_date IS NOT NULL AND next_pm_date <> '' AND substr(next_pm_date,1,10) <= $1`, [today]);
+    for (const m of pm) {
+      const d = m.next_pm_date.slice(0, 10);
+      await notifyManagers(m.organization_id, {
+        type: 'pm_due',
+        title: 'Preventive maintenance due: ' + m.name + ' (' + m.code + ')',
+        body: d < today ? 'Was due on ' + d + ' and is overdue.' : 'Due today (' + d + ').',
+        machineId: m.id, dedupeKey: 'pm:' + m.id + ':' + d
+      });
+    }
+  } catch (e) { console.error('Reminder check failed:', e.message); }
+}
+
+// ================= MACHINE REGISTER DOWNLOAD (Excel) =================
+// Registered before '/api/machines/:id' so ':id' does not swallow it.
+app.get('/api/machines-export', requirePermission('view_machines'), async (req, res) => {
+  try {
+    const orgId = req.session.user.organizationId;
+    const params = [orgId];
+    let where = 'm.organization_id = $1';
+    if (req.query.department) { params.push(req.query.department); where += ' AND m.department = $' + params.length; }
+    if (req.query.status) { params.push(req.query.status); where += ' AND m.status = $' + params.length; }
+    const rows = await dbAll(`
+      SELECT m.code, m.name, m.department, m.location, m.status, m.model, m.serial_number, m.power_rating, m.next_pm_date,
+        (SELECT COALESCE(l.start_time, l.logged_at) FROM logs l WHERE l.machine_id = m.id AND l.log_type = 'Breakdown'
+           AND l.status = 'Pending' AND (l.end_time IS NULL OR l.end_time = '') ORDER BY l.logged_at DESC LIMIT 1) AS down_since,
+        (SELECT COUNT(*) FROM logs l WHERE l.machine_id = m.id AND l.log_type = 'Breakdown') AS breakdowns,
+        (SELECT COALESCE(SUM(l.downtime_hours),0) FROM logs l WHERE l.machine_id = m.id) AS downtime_hrs
+      FROM machines m WHERE ${where}`, params);
+    const sorted = sortMachinesByCategoryAndCode(rows);
+    const org = await dbGet('SELECT name FROM organizations WHERE id = $1', [orgId]);
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Machines');
+    ws.columns = [
+      { header: 'Code', key: 'code', width: 16 }, { header: 'Machine', key: 'name', width: 40 },
+      { header: 'Department', key: 'department', width: 18 }, { header: 'Location', key: 'location', width: 12 },
+      { header: 'Status', key: 'status', width: 10 }, { header: 'Model', key: 'model', width: 18 },
+      { header: 'Serial No.', key: 'serial_number', width: 18 }, { header: 'Power rating', key: 'power_rating', width: 12 },
+      { header: 'Next PM', key: 'next_pm_date', width: 12 }, { header: 'Down since', key: 'down_since', width: 18 },
+      { header: 'Breakdowns (all time)', key: 'breakdowns', width: 12 }, { header: 'Downtime hrs (all time)', key: 'downtime_hrs', width: 12 }
+    ];
+    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B2A4A' } };
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+    sorted.forEach(r => ws.addRow({
+      code: r.code, name: r.name, department: r.department, location: r.location, status: r.status,
+      model: r.model || '', serial_number: r.serial_number || '', power_rating: r.power_rating || '',
+      next_pm_date: r.next_pm_date ? String(r.next_pm_date).slice(0, 10) : '',
+      down_since: r.down_since ? String(r.down_since).replace('T', ' ').slice(0, 16) : '',
+      breakdowns: Number(r.breakdowns) || 0, downtime_hrs: Math.round((Number(r.downtime_hrs) || 0) * 100) / 100
+    }));
+    ws.autoFilter = { from: 'A1', to: 'L1' };
+    const name = ((org && org.name) || 'Machines').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-Machine-Register-' + new Date().toISOString().slice(0, 10) + '.xlsx';
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + name + '"');
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (e) { if (!res.headersSent) res.status(500).json({ error: 'Could not export machines: ' + e.message }); }
+});
+
 app.get('/api/machines', async (req, res) => {
   try {
     const rows = await dbAll(`
@@ -1858,6 +2007,58 @@ app.post('/api/logs', requirePermission('submit_logs'), async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'Could not create log: ' + e.message }); }
 });
 
+// ================= REPORT DOWNTIME (immediate) =================
+// Lets anyone with log-submit access flag a machine as DOWN the moment it
+// stops, before any repair starts. It creates an OPEN breakdown log
+// (Pending, start_time set, end_time NULL) and flips the machine to Down.
+// The supervisor later opens that same log (Edit) to add the actions taken,
+// who worked on it and the end time; completing it puts the machine back to
+// Running and works out the downtime from the real start/end times.
+app.post('/api/downtime-reports', requireAnyPermission('report_breakdown', 'submit_logs'), async (req, res) => {
+  try {
+    const orgId = req.session.user.organizationId;
+    const { machineId, reportedBy, priority, symptom, startTime } = req.body;
+    const what = (symptom || '').toString().trim();
+    if (!machineId || !what) return res.status(400).json({ error: 'Choose the machine and say briefly what happened' });
+    if (priority && !['High', 'Medium', 'Low'].includes(priority)) return res.status(400).json({ error: 'priority must be High, Medium or Low' });
+    const machine = await dbGet('SELECT * FROM machines WHERE id = $1 AND organization_id = $2', [machineId, orgId]);
+    if (!machine) return res.status(404).json({ error: 'Machine not found' });
+
+    const open = await dbGet(
+      "SELECT id, start_time, logged_at FROM logs WHERE organization_id = $1 AND machine_id = $2 AND log_type = 'Breakdown' AND status = 'Pending' AND (end_time IS NULL OR end_time = '') ORDER BY logged_at DESC LIMIT 1",
+      [orgId, machineId]
+    );
+    if (open) return res.status(409).json({ error: 'This machine is already reported down', logId: open.id, since: open.start_time || open.logged_at });
+
+    let start = startTime ? new Date(startTime) : new Date();
+    if (isNaN(start.getTime())) return res.status(400).json({ error: 'Invalid stop time' });
+    if (start.getTime() > Date.now() + 5 * 60000) return res.status(400).json({ error: 'The stop time cannot be in the future' });
+    const startISO = start.toISOString();
+
+    const log = {
+      id: genId('LOG'), machine_id: machineId, organization_id: orgId, log_type: 'Breakdown',
+      reported_by: (reportedBy || '').toString().trim(), priority: priority || 'Medium', technician: '',
+      downtime_hours: 0, findings: what, actions_taken: '', parts_used: '', status: 'Pending',
+      logged_at: startISO, start_time: startISO, end_time: null, reported_user_id: req.session.user.id
+    };
+    await withTransaction(async (client) => {
+      await client.query(`
+        INSERT INTO logs (id, machine_id, organization_id, log_type, reported_by, priority, technician, downtime_hours, findings, actions_taken, parts_used, status, logged_at, start_time, end_time, reported_user_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      `, [log.id, log.machine_id, log.organization_id, log.log_type, log.reported_by, log.priority, log.technician, log.downtime_hours, log.findings, log.actions_taken, log.parts_used, log.status, log.logged_at, log.start_time, log.end_time, log.reported_user_id]);
+      await client.query("UPDATE machines SET status = 'Down' WHERE id = $1", [machineId]);
+    });
+    // Tell the supervisors / management right away (never blocks the report).
+    notifyManagers(orgId, {
+      type: 'breakdown_reported',
+      title: (priority === 'High' ? 'HIGH PRIORITY - ' : '') + machine.name + ' (' + machine.code + ') is down',
+      body: what + (log.reported_by ? ' - reported by ' + log.reported_by : ''),
+      logId: log.id, machineId: machineId, exceptUserId: req.session.user.id
+    }).catch(e => console.error('notify failed:', e.message));
+    res.status(201).json(toLogJSON({ ...log, staff: [], machine_name: machine.name, machine_code: machine.code, machine_department: machine.department, machine_location: machine.location }));
+  } catch (e) { res.status(500).json({ error: 'Could not report downtime: ' + e.message }); }
+});
+
 // Correct a log's content after submission. Supervisor/Management/HOD only.
 // Start/End times can be corrected here too - downtime is always
 // recomputed from them when both are present, same rule as creation, so
@@ -1922,6 +2123,14 @@ app.put('/api/logs/:id', requirePermission('manage_logs'), async (req, res) => {
       loggedAtFinal = parsed.toISOString();
     }
 
+    const closingOpenJob = existing.log_type === 'Breakdown' && existing.status === 'Pending' && status === 'Completed';
+    if (closingOpenJob) {
+      const techNow = technicianFromStaff !== null ? technicianFromStaff : (technician !== undefined ? technician.trim() : existing.technician);
+      const actsNow = actionsTaken !== undefined ? actionsTaken.trim() : existing.actions_taken;
+      if (!techNow || !actsNow) return res.status(400).json({ error: 'To complete this job, add the actions taken and who worked on it' });
+      if (!endTimeFinal) return res.status(400).json({ error: 'To complete this job, set the end time' });
+    }
+
     const updated = {
       machine_id: machineIdFinal,
       log_type: logType || existing.log_type,
@@ -1946,6 +2155,27 @@ app.put('/api/logs/:id', requirePermission('manage_logs'), async (req, res) => {
     `, [updated.machine_id, updated.log_type, updated.reported_by, updated.priority, updated.technician,
         updated.downtime_hours, updated.findings, updated.actions_taken, updated.parts_used, updated.status, updated.logged_at,
         updated.start_time, updated.end_time, req.params.id]);
+
+    // Completing a breakdown that was reported down puts the machine back to
+    // Running - unless another breakdown on the same machine is still open.
+    if (closingOpenJob && updated.status === 'Completed') {
+      const stillOpen = await dbGet(
+        "SELECT id FROM logs WHERE organization_id = $1 AND machine_id = $2 AND id != $3 AND log_type = 'Breakdown' AND status = 'Pending' AND (end_time IS NULL OR end_time = '') LIMIT 1",
+        [orgId, updated.machine_id, req.params.id]
+      );
+      if (!stillOpen) await dbRun("UPDATE machines SET status = 'Running' WHERE id = $1", [updated.machine_id]);
+      // Tell whoever reported it, and the managers, that the machine is back.
+      try {
+        const mach = await dbGet('SELECT name, code FROM machines WHERE id = $1', [updated.machine_id]);
+        const title = (mach ? mach.name + ' (' + mach.code + ')' : 'Machine') + ' is back running';
+        const body = (updated.actions_taken || '').toString().slice(0, 160);
+        if (existing.reported_user_id && existing.reported_user_id !== req.session.user.id) {
+          await createNotification({ orgId, userId: existing.reported_user_id, type: 'breakdown_closed', title, body, logId: req.params.id, machineId: updated.machine_id });
+        }
+        notifyManagers(orgId, { type: 'breakdown_closed', title, body, logId: req.params.id, machineId: updated.machine_id,
+          exceptUserId: req.session.user.id, alsoExcept: existing.reported_user_id }).catch(() => {});
+      } catch (nerr) { console.error('notify failed:', nerr.message); }
+    }
 
     if (newStaffRows !== null) {
       await dbRun('DELETE FROM log_staff WHERE log_id = $1', [req.params.id]);
@@ -2109,15 +2339,54 @@ function buildTechnicianText(staffRows, otherNames, legacyText) {
   if (names.length === 0 && legacyText) return String(legacyText).trim();
   return names.join(', ');
 }
+// Logs imported by SQL (or older logs) may carry only the technician text. Link
+// any log that has NO staff links yet to roster people named in that text. A name
+// matches by full name or by a first/last name word (4+ letters) that belongs to
+// exactly one active staff member. Never touches logs that already have links, so
+// edits made in the app are respected. Throttled to once a minute.
+let lastStaffAutoLink = 0;
+async function autoLinkStaffFromText() {
+  if (Date.now() - lastStaffAutoLink < 60000) return;
+  lastStaffAutoLink = Date.now();
+  try {
+    await dbRun(`
+      WITH words AS (
+        SELECT s.id, s.organization_id, lower(w) AS w
+          FROM staff s, regexp_split_to_table(s.name, '\\s+') AS w WHERE s.active = 1 AND length(w) >= 4
+        UNION SELECT s.id, s.organization_id, lower(s.name) FROM staff s WHERE s.active = 1
+      ), uniq AS (
+        SELECT organization_id, w, MIN(id) AS staff_id FROM words GROUP BY organization_id, w HAVING COUNT(DISTINCT id) = 1
+      )
+      INSERT INTO log_staff (log_id, staff_id)
+      SELECT DISTINCT l.id, u.staff_id
+        FROM logs l JOIN uniq u ON u.organization_id = l.organization_id
+         AND lower(l.technician) ~ ('\\m' || regexp_replace(u.w, '([.*+?^$(){}|\\[\\]\\\\])', '\\\\\\1', 'g') || '\\M')
+       WHERE l.technician <> '' AND NOT EXISTS (SELECT 1 FROM log_staff x WHERE x.log_id = l.id)
+      ON CONFLICT DO NOTHING`);
+  } catch (e) { console.error('Staff auto-link skipped:', e.message); }
+}
+// The log card shows logs.technician. Make sure it always names every linked
+// person (full roster name) plus anyone typed as an "other name", with no duplicates
+// (a bare first name such as "Jared" is dropped when Jared Onyango is linked).
+function mergeTechnicianText(l) {
+  if (!l.staff || l.staff.length === 0) return;
+  const words = new Set();
+  l.staff.forEach(s => String(s.name).toLowerCase().split(/\s+/).forEach(w => words.add(w)));
+  const names = l.staff.map(s => s.name);
+  String(l.technician || '').replace(/\([^)]*\)/g, '').split(/[,;/+&]+/).map(x => x.trim()).filter(Boolean)
+    .forEach(t => { if (!words.has(t.toLowerCase()) && !names.includes(t)) names.push(t); });
+  l.technician = names.join(', ');
+}
 async function attachStaffToLogs(logs) {
   if (logs.length === 0) return;
+  await autoLinkStaffFromText();
   const rows = await dbAll(`
     SELECT ls.log_id, s.id, s.name, s.title, s.discipline, s.active
     FROM log_staff ls JOIN staff s ON s.id = ls.staff_id WHERE ls.log_id = ANY($1) ORDER BY s.name ASC
   `, [logs.map(l => l.id)]);
   const byLog = {};
   rows.forEach(r => { (byLog[r.log_id] = byLog[r.log_id] || []).push(toStaffJSON(r)); });
-  logs.forEach(l => { l.staff = byLog[l.id] || []; });
+  logs.forEach(l => { l.staff = byLog[l.id] || []; mergeTechnicianText(l); });
 }
 
 app.get('/api/staff', async (req, res) => {
@@ -2267,6 +2536,14 @@ app.get('/api/dashboard', async (req, res) => {
     const machinesDownList = sortMachinesByCategoryAndCode(await dbAll(
       "SELECT * FROM machines WHERE organization_id = $1 AND status = 'Down'", [orgId]
     )).map(toMachineJSON);
+    // Attach the open (not yet closed) breakdown log, if any, to each down machine
+    const openDownRows = await dbAll("SELECT id, machine_id, reported_by, priority, findings, start_time, logged_at FROM logs WHERE organization_id = $1 AND log_type = 'Breakdown' AND status = 'Pending' AND (end_time IS NULL OR end_time = '') ORDER BY logged_at ASC", [orgId]);
+    const openByMachine = {};
+    openDownRows.forEach(r => { openByMachine[r.machine_id] = r; });
+    machinesDownList.forEach(m => {
+      const o = openByMachine[m.id];
+      if (o) m.openDowntime = { logId: o.id, since: o.start_time || o.logged_at, reportedBy: o.reported_by || '', priority: o.priority || '', findings: o.findings || '' };
+    });
     const logsThisMonthRow = await dbGet('SELECT COUNT(*) as c FROM logs WHERE organization_id = $1 AND LEFT(logged_at,7) = $2', [orgId, monthPrefix]);
     const pendingLogsRow = await dbGet("SELECT COUNT(*) as c FROM logs WHERE organization_id = $1 AND status = 'Pending'", [orgId]);
     const awaitingReviewRow = await dbGet("SELECT COUNT(*) as c FROM logs WHERE organization_id = $1 AND status = 'Completed'", [orgId]);
@@ -2765,6 +3042,8 @@ async function start() {
   await bootstrapDefaultOrganization();
   await bootstrapOrgAdmin();
   await bootstrapSuperAdmin();
+  setInterval(runReminders, 10 * 60 * 1000);
+  setTimeout(runReminders, 30 * 1000);
   app.listen(PORT, () => {
     console.log(`STEELWORKS CMMS running at http://localhost:${PORT}`);
   });
