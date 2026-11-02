@@ -171,6 +171,26 @@ async function ensureSchema() {
   await pool.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS logo_height INTEGER;`);
   await pool.query(`ALTER TABLE logs ADD COLUMN IF NOT EXISTS start_time TEXT;`);
   await pool.query(`ALTER TABLE logs ADD COLUMN IF NOT EXISTS end_time TEXT;`);
+  await pool.query(`ALTER TABLE logs ADD COLUMN IF NOT EXISTS reported_user_id TEXT;`);
+  // In-app notifications (one row per recipient). dedupe_key stops the same
+  // reminder (e.g. "PM due for machine X on date Y") being created twice.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT,
+      log_id TEXT,
+      machine_id TEXT,
+      dedupe_key TEXT,
+      created_at TEXT NOT NULL,
+      read_at TEXT
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, read_at, created_at);`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_notif_dedupe ON notifications(user_id, dedupe_key) WHERE dedupe_key IS NOT NULL;`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS custom_roles (
       id TEXT PRIMARY KEY,
