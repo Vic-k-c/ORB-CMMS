@@ -1,3 +1,22 @@
+/* BUILD-STAMP 2026-11-03-A : if you do not see the grey 'build A' tag bottom-left, this file is NOT the one being served */
+(function(){
+  function bar(msg){
+    try{
+      var b=document.getElementById('__errbar');
+      if(!b){b=document.createElement('div');b.id='__errbar';
+        b.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#b00020;color:#fff;font:12px/1.4 monospace;padding:8px 10px;max-height:40vh;overflow:auto;white-space:pre-wrap';
+        (document.body||document.documentElement).appendChild(b);}
+      b.textContent+= msg+'\n';
+    }catch(e){}
+  }
+  window.addEventListener('error',function(e){ bar('JS ERROR: '+e.message+'  @ '+(e.filename||'').split('/').pop()+':'+e.lineno+':'+e.colno); });
+  window.addEventListener('unhandledrejection',function(e){ bar('PROMISE: '+(e.reason&&e.reason.message||e.reason)); });
+  document.addEventListener('DOMContentLoaded',function(){
+    var t=document.createElement('div'); t.textContent='build A';
+    t.style.cssText='position:fixed;left:4px;bottom:2px;z-index:99998;font:10px sans-serif;color:#888;pointer-events:none';
+    document.body.appendChild(t);
+  });
+})();
 const API = '/api';
 let machinesCache = [];
 let logCache = {};
@@ -1841,7 +1860,7 @@ function filterMachinePicker(query){
   }
   resultsBox.style.display = 'block';
 }
-document.getElementById('logMachineSearch').addEventListener('focus', (e)=>{ if(!document.getElementById('logMachine').value) filterMachinePicker(e.target.value); });
+{ const _lms=document.getElementById('logMachineSearch'); if(_lms) _lms.addEventListener('focus', (e)=>{ if(!document.getElementById('logMachine').value) filterMachinePicker(e.target.value); }); }
 document.getElementById('logMachineSearch').addEventListener('input', (e)=> filterMachinePicker(e.target.value));
 document.addEventListener('click', (e)=>{
   const picker = document.getElementById('logMachineSearch');
