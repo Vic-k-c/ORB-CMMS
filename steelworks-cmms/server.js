@@ -457,6 +457,58 @@ async function computeMachineMetrics(organizationId, machineId, fromDate, toDate
   };
 }
 
+
+// One query for every machine's metrics (the old per-machine loop ran one
+// database round-trip per machine, which is what made the matrix slow).
+async function computeAllMachineMetrics(organizationId, machines, fromDate, toDate) {
+  const logs = await dbAll(`
+    SELECT machine_id, log_type, downtime_hours, start_time, end_time, logged_at FROM logs
+    WHERE organization_id = $1 AND LEFT(logged_at,10) BETWEEN $2 AND $3
+  `, [organizationId, addDays(fromDate, -7), addDays(toDate, 7)]);
+  const byMachine = new Map();
+  logs.forEach(l => { if (!byMachine.has(l.machine_id)) byMachine.set(l.machine_id, []); byMachine.get(l.machine_id).push(l); });
+  const scheduledHours = await getScheduledHours(organizationId, fromDate, toDate);
+  const out = new Map();
+  machines.forEach(m => {
+    const ml = byMachine.get(m.id) || [];
+    const withHrs = ml.map(l => ({ l, h: proratedDowntimeHours(l, fromDate, toDate) }));
+    const cum = round2(withHrs.reduce((s, x) => s + x.h, 0));
+    const bd = withHrs.filter(x => x.l.log_type === 'Breakdown');
+    const failures = bd.filter(x => x.h > 0).length;
+    const bdHrs = round2(bd.reduce((s, x) => s + x.h, 0));
+    const operating = Math.max(0, scheduledHours - cum);
+    out.set(m.id, {
+      fromDate, toDate, cumulativeDowntimeHours: cum, numberOfFailures: failures,
+      scheduledHours: round2(scheduledHours), operatingTimeHours: round2(operating),
+      mttr: failures > 0 ? round2(bdHrs / failures) : null,
+      mtbf: failures > 0 ? round2(operating / failures) : null,
+      breakdownDowntimeHours: bdHrs
+    });
+  });
+  return out;
+}
+
+// Roll machine metrics up to their category (the machine's department field).
+function rollUpGroups(machines, metricsMap) {
+  const groups = new Map();
+  machines.forEach(m => {
+    const key = m.department || 'Uncategorised';
+    const g = groups.get(key) || { group: key, machines: 0, downtimeHours: 0, failures: 0, breakdownDowntimeHours: 0, scheduled: 0 };
+    const x = metricsMap.get(m.id); if (!x) return;
+    g.machines++; g.downtimeHours += x.cumulativeDowntimeHours; g.failures += x.numberOfFailures;
+    g.breakdownDowntimeHours += x.breakdownDowntimeHours; g.scheduled += x.scheduledHours;
+    groups.set(key, g);
+  });
+  const totalDown = Array.from(groups.values()).reduce((a, g) => a + g.downtimeHours, 0);
+  return Array.from(groups.values()).map(g => ({
+    group: g.group, machines: g.machines, downtimeHours: round2(g.downtimeHours), failures: g.failures,
+    sharePct: totalDown > 0 ? Math.round(g.downtimeHours / totalDown * 1000) / 10 : 0,
+    mttr: g.failures > 0 ? round2(g.breakdownDowntimeHours / g.failures) : null,
+    mtbf: g.failures > 0 ? round2(Math.max(0, g.scheduled - g.downtimeHours) / g.failures) : null,
+    operatingTimeHours: round2(Math.max(0, g.scheduled - g.downtimeHours))
+  })).sort((a, b) => b.downtimeHours - a.downtimeHours);
+}
+
 // Natural ordering for machine codes: ZSF/M-2 before ZSF/M-10, ZSF/AWM/009
 // before ZSF/AWM/010. Machines are grouped by category (department), then
 // ordered by code inside each category.
@@ -1628,11 +1680,9 @@ app.get('/api/machines/metrics-matrix', requirePermission('manage_machines'), as
       ? await dbAll('SELECT id, name, code, department FROM machines WHERE organization_id = $1 AND department = $2', [orgId, department])
       : await dbAll('SELECT id, name, code, department FROM machines WHERE organization_id = $1', [orgId]);
     machines = sortMachinesByCategoryAndCode(machines);
-    const rows = [];
-    for (const m of machines) {
-      rows.push({ machineId: m.id, machineName: m.name, machineCode: m.code, department: m.department || '', ...(await computeMachineMetrics(orgId, m.id, fromDate, toDate)) });
-    }
-    res.json({ fromDate, toDate, rows });
+    const metricsMap = await computeAllMachineMetrics(orgId, machines, fromDate, toDate);
+    const rows = machines.map(m => ({ machineId: m.id, machineName: m.name, machineCode: m.code, department: m.department || '', ...metricsMap.get(m.id) }));
+    res.json({ fromDate, toDate, rows, groups: rollUpGroups(machines, metricsMap) });
   } catch (e) { res.status(500).json({ error: 'Could not load performance matrix: ' + e.message }); }
 });
 
@@ -1646,10 +1696,8 @@ app.get('/api/machines/metrics-matrix/export/excel', requirePermission('manage_m
       ? await dbAll('SELECT id, name, code, department FROM machines WHERE organization_id = $1 AND department = $2', [orgId, department])
       : await dbAll('SELECT id, name, code, department FROM machines WHERE organization_id = $1', [orgId]);
     machines = sortMachinesByCategoryAndCode(machines);
-    const rows = [];
-    for (const m of machines) {
-      rows.push({ machineName: m.name, machineCode: m.code, ...(await computeMachineMetrics(orgId, m.id, fromDate, toDate)) });
-    }
+    const metricsMap2 = await computeAllMachineMetrics(orgId, machines, fromDate, toDate);
+    const rows = machines.map(m => ({ machineName: m.name, machineCode: m.code, ...metricsMap2.get(m.id) }));
 
     const workbook = new ExcelJS.Workbook();
     workbook.creator = `${org.name} - STEELWORKS CMMS`;
@@ -2851,6 +2899,81 @@ app.get('/api/reports/yearly', async (req, res) => {
     const comparison = await computeYearlyComparison(orgId, parseInt(year));
     res.json({ year, monthlyBreakdown, totalLogs, totalDowntime, preventiveCount, breakdownCount, partsUsedSummary, comparison });
   } catch (e) { res.status(500).json({ error: 'Could not load yearly report: ' + e.message }); }
+});
+
+
+// Period summary used by the Daily/Monthly/Yearly report pages and their PDFs:
+// downtime per group (machine category), worst machines, preventive vs
+// breakdown, technician workload, parts used and the breakdown list.
+app.get('/api/reports/summary', async (req, res) => {
+  try {
+    const orgId = req.session.user.organizationId;
+    const { fromDate, toDate } = resolvePeriod(req.query);
+    const machines = await dbAll('SELECT id, name, code, department, status FROM machines WHERE organization_id = $1', [orgId]);
+    const metricsMap = await computeAllMachineMetrics(orgId, machines, fromDate, toDate);
+    const groups = rollUpGroups(machines, metricsMap);
+
+    const inRange = await dbAll(`
+      SELECT l.id, l.machine_id, l.log_type, l.status, l.downtime_hours, l.start_time, l.end_time, l.logged_at,
+             l.findings, l.actions_taken, l.parts_used, l.technician
+      FROM logs l WHERE l.organization_id = $1 AND LEFT(l.logged_at,10) BETWEEN $2 AND $3
+      ORDER BY l.logged_at DESC
+    `, [orgId, fromDate, toDate]);
+    const mById = new Map(machines.map(m => [m.id, m]));
+    const preventive = inRange.filter(l => l.log_type === 'Preventive').length;
+    const breakdown = inRange.filter(l => l.log_type === 'Breakdown').length;
+
+    const all = Array.from(metricsMap.values());
+    const totalDown = round2(all.reduce((a, x) => a + x.cumulativeDowntimeHours, 0));
+    const totalFailures = all.reduce((a, x) => a + x.numberOfFailures, 0);
+    const totalBdHrs = all.reduce((a, x) => a + x.breakdownDowntimeHours, 0);
+    const sched = all.length ? all[0].scheduledHours : 0;
+    const totals = {
+      logs: inRange.length, preventive, breakdown, failures: totalFailures, downtimeHours: totalDown,
+      mttr: totalFailures ? round2(totalBdHrs / totalFailures) : null,
+      mtbf: totalFailures ? round2(Math.max(0, sched * all.length - totalDown) / totalFailures) : null,
+      pending: inRange.filter(l => l.status === 'Pending').length,
+      completed: inRange.filter(l => l.status === 'Completed').length,
+      reviewed: inRange.filter(l => l.status === 'Reviewed').length,
+      machines: machines.length, machinesDown: machines.filter(m => m.status === 'Down').length,
+      scheduledHoursPerMachine: sched
+    };
+
+    const topMachines = machines.map(m => {
+      const x = metricsMap.get(m.id);
+      return { code: m.code, name: m.name, group: m.department || 'Uncategorised', failures: x.numberOfFailures, downtimeHours: x.cumulativeDowntimeHours, mttr: x.mttr };
+    }).filter(r => r.downtimeHours > 0 || r.failures > 0)
+      .sort((a, b) => b.downtimeHours - a.downtimeHours || b.failures - a.failures).slice(0, 10);
+
+    const staffRows = await dbAll(`
+      SELECT s.id, s.name, s.discipline, l.log_type, l.status, l.downtime_hours
+      FROM log_staff ls JOIN staff s ON s.id = ls.staff_id JOIN logs l ON l.id = ls.log_id
+      WHERE l.organization_id = $1 AND LEFT(l.logged_at,10) BETWEEN $2 AND $3
+    `, [orgId, fromDate, toDate]);
+    const sm = new Map();
+    staffRows.forEach(r => {
+      const p = sm.get(r.id) || { name: r.name, discipline: r.discipline, jobs: 0, breakdown: 0, preventive: 0, completed: 0, hours: 0 };
+      p.jobs++; if (r.log_type === 'Breakdown') p.breakdown++; else p.preventive++;
+      if (r.status === 'Completed' || r.status === 'Reviewed') p.completed++;
+      p.hours += Number(r.downtime_hours) || 0; sm.set(r.id, p);
+    });
+    const staff = Array.from(sm.values()).map(p => ({ ...p, hours: round2(p.hours) })).sort((a, b) => b.jobs - a.jobs);
+
+    const parts = inRange.filter(l => l.parts_used && String(l.parts_used).trim()).slice(0, 80).map(l => {
+      const m = mById.get(l.machine_id) || {};
+      return { date: l.logged_at.slice(0, 10), code: m.code || '', name: m.name || '', parts: l.parts_used };
+    });
+    const breakdowns = inRange.filter(l => l.log_type === 'Breakdown').map(l => {
+      const m = mById.get(l.machine_id) || {};
+      return {
+        date: l.logged_at.slice(0, 10), code: m.code || '', name: m.name || '', group: m.department || 'Uncategorised',
+        findings: l.findings || '', actions: l.actions_taken || '', hours: round2(Number(l.downtime_hours) || 0),
+        technician: l.technician || '', status: l.status
+      };
+    }).sort((a, b) => b.hours - a.hours).slice(0, 60);
+
+    res.json({ fromDate, toDate, totals, groups, topMachines, staff, parts, breakdowns });
+  } catch (e) { res.status(500).json({ error: 'Could not load report summary: ' + e.message }); }
 });
 
 // ================= EXCEL EXPORT (own org only) =================
