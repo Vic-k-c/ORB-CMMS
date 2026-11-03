@@ -1,4 +1,3 @@
-/* BUILD-STAMP 2026-11-03-A : if you do not see the grey 'build A' tag bottom-left, this file is NOT the one being served */
 (function(){
   function bar(msg){
     try{
@@ -11,11 +10,6 @@
   }
   window.addEventListener('error',function(e){ bar('JS ERROR: '+e.message+'  @ '+(e.filename||'').split('/').pop()+':'+e.lineno+':'+e.colno); });
   window.addEventListener('unhandledrejection',function(e){ bar('PROMISE: '+(e.reason&&e.reason.message||e.reason)); });
-  document.addEventListener('DOMContentLoaded',function(){
-    var t=document.createElement('div'); t.textContent='build A';
-    t.style.cssText='position:fixed;left:4px;bottom:2px;z-index:99998;font:10px sans-serif;color:#888;pointer-events:none';
-    document.body.appendChild(t);
-  });
 })();
 const API = '/api';
 let machinesCache = [];
@@ -946,11 +940,44 @@ function downSinceText(iso){
 }
 setInterval(()=>{ document.querySelectorAll('.down-since[data-since]').forEach(el=>{ el.textContent = downSinceText(el.dataset.since); }); }, 60000);
 
+// Generic "show a list below the box as you type" for any machine text input.
+// Replaces the browser's datalist, which on phones shows nothing until the
+// box is cleared. Tap a row to fill the box with "Name (CODE)".
+function attachMachineAutocomplete(inputId){
+  const input = document.getElementById(inputId);
+  if(!input || input.dataset.ac) return;
+  input.dataset.ac = '1';
+  input.removeAttribute('list');
+  input.setAttribute('autocomplete','off');
+  const wrap = document.createElement('div'); wrap.className = 'machine-picker';
+  input.parentNode.insertBefore(wrap, input); wrap.appendChild(input);
+  const box = document.createElement('div'); box.className = 'machine-picker-results'; box.style.display = 'none';
+  wrap.appendChild(box);
+  function render(){
+    const q = input.value.trim().toLowerCase();
+    const list = sortMachines(machinesCache.filter(m => !q || m.name.toLowerCase().includes(q) || m.code.toLowerCase().includes(q))).slice(0,60);
+    box.innerHTML = list.length
+      ? list.map(m => `<div class="machine-picker-item" data-id="${escapeHtml(m.id)}"><span class="machine-picker-code">${escapeHtml(m.code)}</span> ${escapeHtml(m.name)}</div>`).join('')
+      : '<div class="machine-picker-empty">No matching machines</div>';
+    box.style.display = 'block';
+  }
+  input.addEventListener('input', render);
+  input.addEventListener('focus', render);
+  box.addEventListener('mousedown', e => e.preventDefault());
+  box.addEventListener('click', e => {
+    const row = e.target.closest('.machine-picker-item'); if(!row) return;
+    const m = machinesCache.find(x => x.id === row.dataset.id); if(!m) return;
+    input.value = m.name + ' (' + m.code + ')';
+    box.style.display = 'none';
+  });
+  document.addEventListener('click', e => { if(!wrap.contains(e.target)) box.style.display = 'none'; });
+}
+window.attachMachineAutocomplete = attachMachineAutocomplete;
+
 // ---- Report Breakdown (quick) ----
 async function openDowntimeForm(){
   await loadMachinesCache();
-  const dl = document.getElementById('dtMachineList');
-  dl.innerHTML = machinesCache.map(m=>`<option value="${escapeHtml(m.name+' ('+m.code+')')}"></option>`).join('');
+  attachMachineAutocomplete('dtMachine');
   document.getElementById('downtimeForm').reset();
   document.getElementById('dtDate').value = nowLocalDateStr();
   document.getElementById('dtTime').value = nowLocalTimeStr();
@@ -967,7 +994,8 @@ document.addEventListener('submit', async (e)=>{
   e.preventDefault();
   const err = document.getElementById('dtError');
   const typed = document.getElementById('dtMachine').value.trim().toLowerCase();
-  const m = machinesCache.find(x => (x.name+' ('+x.code+')').toLowerCase() === typed) || machinesCache.find(x => x.code.toLowerCase() === typed);
+  let m = machinesCache.find(x => (x.name+' ('+x.code+')').toLowerCase() === typed) || machinesCache.find(x => x.code.toLowerCase() === typed);
+  if(!m && typed){ const hits = machinesCache.filter(x => (x.name+' '+x.code).toLowerCase().includes(typed)); if(hits.length === 1) m = hits[0]; }
   if(!m){ err.textContent = 'Pick the machine from the list that appears as you type.'; err.style.display = 'block'; return; }
   const startISO = localDateTimeToISO(document.getElementById('dtDate').value, document.getElementById('dtTime').value);
   const btn = document.getElementById('dtSubmit'); btn.disabled = true;
@@ -3215,4 +3243,4 @@ if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(()=>{});
   });
-}
+      }
