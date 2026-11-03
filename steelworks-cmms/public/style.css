@@ -743,3 +743,33 @@ table.perf-table th{background:var(--grey-lighter,#f3f4f5);color:var(--navy,#0B2
 .notif-body{font-size:12px;color:#444;margin-top:2px;}
 .notif-time{font-size:11px;color:#888;margin-top:3px;font-family:'IBM Plex Mono',monospace;}
 .notif-empty{padding:18px;text-align:center;color:#888;font-size:13px;}
+
+/* live filters */
+.filter-count{font-size:12px;color:var(--grey);font-family:'IBM Plex Mono',monospace;white-space:nowrap;}
+.filter-active{border-color:var(--navy) !important;background:var(--navy-pale) !important;}
+.filter-badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:9px;background:var(--navy);color:#fff;font-size:11px;line-height:18px;text-align:center;}
+
+/* Long organisation names: title shrinks/wraps instead of sliding under the bell and Log Out */
+@media (max-width:768px){
+  .plant-id{flex:1 1 0;min-width:0;}
+  .plant-id > div:last-child{min-width:0;flex:1 1 auto;}
+  h1{white-space:normal;font-size:clamp(13px,4vw,18px);line-height:1.15;overflow-wrap:anywhere;}
+  .header-logo{max-width:30vw;}
+  .header-right{flex-shrink:0;}
+}
+
+/* busy buttons (double-click protection) */
+button.is-busy{opacity:.65;cursor:progress;position:relative;}
+button.is-busy::after{content:'';display:inline-block;width:11px;height:11px;margin-left:8px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:-1px;animation:busyspin .7s linear infinite;}
+@keyframes busyspin{to{transform:rotate(360deg)}}
+
+/* report summary tables */
+.table-scroll{overflow-x:auto;}
+.summary-table{min-width:520px;}
+.summary-table tbody tr{cursor:default;}
+.share-bar{height:4px;background:var(--grey-lighter);border-radius:2px;margin-top:4px;min-width:60px;}
+.share-bar i{display:block;height:100%;background:var(--red);border-radius:2px;}
+.muted-sm{font-size:11px;color:var(--grey);}
+.kpi-line{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--text);}
+.kpi-line b{color:var(--navy);}
+.report-summary{display:block;}
