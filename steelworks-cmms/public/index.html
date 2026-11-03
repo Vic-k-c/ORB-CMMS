@@ -416,7 +416,8 @@
       <input type="text" id="machineSearch" placeholder="Search by machine name or code">
       <select id="categoryFilter" onchange="setMachineCategory(this.value)"></select>
       <select id="machineStatusFilter"><option value="">All Statuses</option><option>Running</option><option>Down</option><option>Standby</option></select>
-      <button class="btn-ghost" onclick="renderMachines()">Search</button>
+      <button class="btn-ghost" onclick="clearMachineFilters()">Clear</button>
+      <span class="filter-count" id="machineCount"></span>
     </div>
 
     <div class="machines-toolbar">
@@ -559,13 +560,14 @@
       <button class="btn-ghost filters-toggle-btn" onclick="document.getElementById('logsFilterBar').classList.toggle('open')">&#9881; Filters</button>
     </div>
     <div class="search-bar" id="logsFilterBar">
+      <input type="text" id="logSearch" placeholder="Search machine, code, fault, technician" autocomplete="off">
       <select id="logMachineFilter"><option value="">All Machines</option></select>
       <select id="logTypeFilter"><option value="">All Types</option><option>Preventive</option><option>Breakdown</option></select>
       <select id="logStatusFilter"><option value="">All Statuses</option><option>Pending</option><option>Completed</option><option>Reviewed</option></select>
       <input type="date" id="logFilterFrom" title="From date">
       <input type="date" id="logFilterTo" title="To date">
-      <button class="btn-ghost" onclick="renderLogsPage()">Filter</button>
-      <button class="btn-ghost" onclick="clearLogFilters()">Clear</button>
+            <button class="btn-ghost" onclick="clearLogFilters()">Clear</button>
+      <span class="filter-count" id="logCount"></span>
       <button class="btn-ghost" onclick="exportLogsExcel()">&#11015; Excel</button>
     </div>
 
@@ -707,8 +709,7 @@
     <div class="report-view active" id="report-daily">
       <div class="search-bar">
         <input type="date" id="dailyDate">
-        <button class="btn-ghost" onclick="loadDailyReport()">Load</button>
-        <button class="btn-primary" onclick="downloadDailyPDF()">&#11015; Download PDF</button>
+                <button class="btn-primary" onclick="downloadDailyPDF()">&#11015; Download PDF</button>
       </div>
       <div class="stat-row">
         <div class="mini-stat"><div class="mini-value" id="dailyTotalLogs">0</div><div class="mini-label">Total Logs</div></div>
@@ -717,14 +718,14 @@
         <div class="mini-stat"><div class="mini-value" id="dailyDowntime">0</div><div class="mini-label">Downtime (hrs)</div><div class="mini-delta" id="dailyDowntimeDelta"></div></div>
       </div>
       <div class="chart-panel"><h3>Logs by Type</h3><div class="chart-box small"><canvas id="dailyChart"></canvas></div></div>
+      <div class="report-summary" id="dailySummary"></div>
       <div class="panel-block"><h3>Logs on This Date</h3><div id="dailyLogsList"></div></div>
     </div>
 
     <div class="report-view" id="report-monthly">
       <div class="search-bar">
         <input type="month" id="monthlyDate">
-        <button class="btn-ghost" onclick="loadMonthlyReport()">Load</button>
-        <button class="btn-primary" onclick="downloadMonthlyPDF()">&#11015; Download PDF</button>
+                <button class="btn-primary" onclick="downloadMonthlyPDF()">&#11015; Download PDF</button>
       </div>
       <div class="stat-row">
         <div class="mini-stat"><div class="mini-value" id="monthlyTotalLogs">0</div><div class="mini-label">Total Logs</div></div>
@@ -733,14 +734,14 @@
         <div class="mini-stat"><div class="mini-value" id="monthlyDowntime">0</div><div class="mini-label">Downtime (hrs)</div><div class="mini-delta" id="monthlyDowntimeDelta"></div></div>
       </div>
       <div class="chart-panel"><h3>Daily Log Volume This Month</h3><div class="chart-box"><canvas id="monthlyChart"></canvas></div></div>
+      <div class="report-summary" id="monthlySummary"></div>
       <div class="panel-block"><h3>Parts / Items Used This Month</h3><div id="monthlyPartsList"></div></div>
     </div>
 
     <div class="report-view" id="report-yearly">
       <div class="search-bar">
         <input type="number" id="yearlyDate" placeholder="2026" style="max-width:120px;">
-        <button class="btn-ghost" onclick="loadYearlyReport()">Load</button>
-        <button class="btn-primary" onclick="downloadYearlyPDF()">&#11015; Download PDF</button>
+                <button class="btn-primary" onclick="downloadYearlyPDF()">&#11015; Download PDF</button>
       </div>
       <div class="stat-row">
         <div class="mini-stat"><div class="mini-value" id="yearlyTotalLogs">0</div><div class="mini-label">Total Logs</div></div>
@@ -749,6 +750,7 @@
         <div class="mini-stat"><div class="mini-value" id="yearlyDowntime">0</div><div class="mini-label">Downtime (hrs)</div><div class="mini-delta" id="yearlyDowntimeDelta"></div></div>
       </div>
       <div class="chart-panel"><h3>Monthly Log Volume This Year</h3><div class="chart-box"><canvas id="yearlyChart"></canvas></div></div>
+      <div class="report-summary" id="yearlySummary"></div>
       <div class="panel-block"><h3>Parts / Items Used This Year <span class="label-note">(most recent 200)</span></h3><div id="yearlyPartsList"></div></div>
     </div>
   </section>
@@ -784,8 +786,7 @@
       <input type="date" id="perfFrom" title="From" style="display:none;">
       <input type="date" id="perfTo" title="To" style="display:none;">
       <select id="perfDiscipline"><option value="">All disciplines</option><option>Electrical</option><option>Mechanical</option></select>
-      <button class="btn-primary" onclick="loadPerformance()">Load</button>
-    </div>
+          </div>
     <div class="stat-row">
       <div class="mini-stat"><div class="mini-value" id="perfJobs">0</div><div class="mini-label">Jobs (person-jobs)</div></div>
       <div class="mini-stat"><div class="mini-value" id="perfHours">0</div><div class="mini-label">Hours on jobs</div></div>
@@ -999,4 +1000,4 @@
 <script src="/app.js"></script>
 <script src="/kanban.js"></script>
 </body>
-          </html>
+  </html>
