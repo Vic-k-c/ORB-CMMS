@@ -266,6 +266,43 @@ async function apiDelete(url, body){
 }
 async function apiPatch(url,body){ const res=await fetch(API+url,{method:'PATCH',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); return handleApiResponse(res); }
 
+// ============ DOUBLE-CLICK PROTECTION ============
+// Every save/add/delete goes through here. (1) The button that was just pressed
+// is disabled and shows a spinner until the server answers, so tapping it three
+// times can no longer add three cards. (2) If the exact same request is already
+// in flight it is not sent again - the second caller just gets the first answer.
+let __lastBtn = null, __lastBtnAt = 0;
+function __rememberBtn(el){
+  const b = el && el.closest ? el.closest('button, input[type="submit"]') : null;
+  if(b){ __lastBtn = b; __lastBtnAt = Date.now(); }
+}
+document.addEventListener('click', e => __rememberBtn(e.target), true);
+document.addEventListener('submit', e => { if(e.submitter) __rememberBtn(e.submitter); }, true);
+const __inflight = new Map();
+function guardWrite(method, fn){
+  return function(url, body){
+    const key = method + ' ' + url + ' ' + (body === undefined ? '' : JSON.stringify(body));
+    if(__inflight.has(key)) return __inflight.get(key);
+    let btn = (__lastBtn && __lastBtn.isConnected && Date.now() - __lastBtnAt < 1500 && !__lastBtn.disabled) ? __lastBtn : null;
+    const label = btn ? btn.textContent : '';
+    if(btn){ btn.disabled = true; btn.classList.add('is-busy'); }
+    const p = fn(url, body).finally(() => {
+      __inflight.delete(key);
+      if(btn){
+        btn.classList.remove('is-busy');
+        // Leave it disabled if the handler itself disabled it on purpose (e.g. "Added").
+        if(!(btn.disabled && btn.textContent !== label)) btn.disabled = false;
+      }
+    });
+    __inflight.set(key, p);
+    return p;
+  };
+}
+apiPost = guardWrite('POST', apiPost);
+apiPut = guardWrite('PUT', apiPut);
+apiPatch = guardWrite('PATCH', apiPatch);
+apiDelete = guardWrite('DELETE', apiDelete);
+
 // ============ BRANDING (letterhead constants, cached after login) ============
 let brandingCache = null;
 let logoDataUrlCache = undefined; // undefined = not yet checked, null = no logo, string = data URL
@@ -1164,6 +1201,7 @@ async function loadMatrix(){
     const empty = document.getElementById('matrixEmpty');
     if(data.rows.length===0){ tbody.innerHTML=''; empty.style.display='block'; return; }
     empty.style.display='none';
+    const grp = {}; (data.groups||[]).forEach(g=>{ grp[g.group] = g; });
     tbody.innerHTML = groupByCategory(sortMachines(data.rows,'department','machineCode'), 'department', r=>`
       <tr onclick="openMachineDetail('${r.machineId}')">
         <td><b>${escapeHtml(r.machineName)}</b> <span class="matrix-code">(${escapeHtml(r.machineCode)})</span></td>
@@ -1172,7 +1210,12 @@ async function loadMatrix(){
         <td>${r.mttr!==null ? r.mttr : 'N/A'}</td>
         <td>${r.mtbf!==null ? r.mtbf : 'N/A'}</td>
         <td>${r.operatingTimeHours}</td>
-      </tr>`, (d,n)=>`<tr class="group-row"><td colspan="6">${escapeHtml(d)} <span>(${n})</span></td></tr>`);
+      </tr>`, (d,n)=>{
+      const g = grp[d] || grp['Uncategorised'];
+      return g
+        ? `<tr class="group-row"><td>${escapeHtml(d)} <span>(${n})</span></td><td>${g.downtimeHours}</td><td>${g.failures}</td><td>${g.mttr!==null?g.mttr:'N/A'}</td><td>${g.mtbf!==null?g.mtbf:'N/A'}</td><td>${g.operatingTimeHours}</td></tr>`
+        : `<tr class="group-row"><td colspan="6">${escapeHtml(d)} <span>(${n})</span></td></tr>`;
+    });
   }catch(e){ showToast('Could not load performance matrix: '+e.message); }
 }
 window.loadMatrix = loadMatrix;
@@ -1336,6 +1379,11 @@ function applyMachineViewMode(){
   document.getElementById('viewToggleCard').classList.toggle('active', isCard);
   document.getElementById('viewToggleTable').classList.toggle('active', !isCard);
 }
+function clearMachineFilters(){
+  document.getElementById('machineSearch').value=''; document.getElementById('machineStatusFilter').value='';
+  const cf=document.getElementById('categoryFilter'); if(cf) cf.value='All'; machineState.category='All'; renderMachines();
+}
+window.clearMachineFilters = clearMachineFilters;
 function renderMachines(){
   const search = document.getElementById('machineSearch').value.trim().toLowerCase();
   const status = document.getElementById('machineStatusFilter').value;
@@ -1343,6 +1391,7 @@ function renderMachines(){
   if(search) list = list.filter(m => m.name.toLowerCase().includes(search) || m.code.toLowerCase().includes(search));
   if(status) list = list.filter(m => m.status === status);
   if(machineState.category !== 'All') list = list.filter(m => (m.department||'\u2014') === machineState.category);
+  const mc=document.getElementById('machineCount'); if(mc) mc.textContent = list.length+' machine'+(list.length===1?'':'s');
 
   const grid = document.getElementById('machineGrid');
   const tableWrap = document.getElementById('machineTableWrap');
@@ -1755,6 +1804,7 @@ async function loadLogsPage(){
 }
 
 function clearLogFilters(){
+  const ls=document.getElementById('logSearch'); if(ls) ls.value='';
   document.getElementById('logMachineFilter').value = '';
   document.getElementById('logTypeFilter').value = '';
   document.getElementById('logStatusFilter').value = '';
@@ -1804,7 +1854,10 @@ function applyLogViewMode(){
 }
 window.setLogView = setLogView;
 
+let logsSeq = 0;
 async function renderLogsPage(){
+  const seq = ++logsSeq;
+  const q = (document.getElementById('logSearch')||{value:''}).value.trim().toLowerCase();
   const machineId = document.getElementById('logMachineFilter').value;
   const logType = document.getElementById('logTypeFilter').value;
   const status = document.getElementById('logStatusFilter').value;
@@ -1817,7 +1870,10 @@ async function renderLogsPage(){
   if(from) params.set('from', from);
   if(to) params.set('to', to);
   try{
-    const logs = await apiGet('/logs?'+params.toString());
+    let logs = await apiGet('/logs?'+params.toString());
+    if(seq !== logsSeq) return; // a newer filter change is already loading
+    if(q) logs = logs.filter(l => [l.machineName,l.machineCode,l.findings,l.actionsTaken,l.technician].join(' ').toLowerCase().includes(q));
+    const lc = document.getElementById('logCount'); if(lc) lc.textContent = logs.length + ' log' + (logs.length===1?'':'s');
     const list = document.getElementById('logsPageList');
     const tableBody = document.getElementById('logsTableBody');
     const empty = document.getElementById('logsEmpty');
@@ -2711,11 +2767,55 @@ function renderDelta(elId, data){
   }).join('');
 }
 
+
+// ============ REPORT SUMMARY (downtime per group etc.) ============
+window.__sum = window.__sum || {};
+function fmtH(n){ return (n===null||n===undefined) ? 'N/A' : (Math.round(n*10)/10).toString(); }
+async function loadReportSummary(kind, qs){
+  const box = document.getElementById(kind+'Summary');
+  try{
+    const d = await apiGet('/reports/summary?'+qs);
+    window.__sum[kind] = d;
+    if(box) box.innerHTML = reportSummaryHtml(d);
+    return d;
+  }catch(e){ window.__sum[kind] = null; if(box) box.innerHTML = ''; return null; }
+}
+function reportSummaryHtml(d){
+  const t = d.totals;
+  const groupRows = d.groups.filter(g=>g.downtimeHours>0||g.failures>0).map(g=>`
+    <tr><td><b>${escapeHtml(g.group)}</b></td><td>${g.machines}</td><td>${g.failures}</td>
+    <td>${fmtH(g.downtimeHours)}<div class="share-bar"><i style="width:${Math.min(100,g.sharePct)}%"></i></div></td>
+    <td>${g.sharePct}%</td><td>${fmtH(g.mttr)}</td><td>${fmtH(g.mtbf)}</td></tr>`).join('');
+  const topRows = d.topMachines.map((m,i)=>`
+    <tr><td>${i+1}</td><td><b>${escapeHtml(m.name)}</b> <span class="matrix-code">(${escapeHtml(m.code)})</span><div class="muted-sm">${escapeHtml(m.group)}</div></td>
+    <td>${m.failures}</td><td>${fmtH(m.downtimeHours)}</td><td>${fmtH(m.mttr)}</td></tr>`).join('');
+  const staffRows = d.staff.map(p=>`
+    <tr><td><b>${escapeHtml(p.name)}</b><div class="muted-sm">${escapeHtml(p.discipline)}</div></td><td>${p.jobs}</td><td>${p.breakdown}</td><td>${p.preventive}</td><td>${p.completed}</td><td>${fmtH(p.hours)}</td></tr>`).join('');
+  return `
+    <div class="chart-panel summary-kpis">
+      <h3>Maintenance Summary</h3>
+      <div class="kpi-line">
+        <span><b>${t.preventive}</b> preventive</span><span><b>${t.breakdown}</b> breakdown</span>
+        <span><b>${t.failures}</b> failures</span><span><b>${fmtH(t.downtimeHours)}</b> h downtime</span>
+        <span>MTTR <b>${fmtH(t.mttr)}</b> h</span><span>MTBF <b>${fmtH(t.mtbf)}</b> h</span>
+        <span><b>${t.pending}</b> pending</span><span><b>${t.completed}</b> completed</span><span><b>${t.reviewed}</b> reviewed</span>
+        <span><b>${t.machinesDown}</b> of ${t.machines} machines down now</span>
+      </div>
+    </div>
+    <div class="panel-block"><h3>Downtime by Group</h3>
+      ${groupRows ? `<div class="table-scroll"><table class="matrix-table summary-table"><thead><tr><th>Group</th><th>Machines</th><th>Failures</th><th>Downtime (hrs)</th><th>Share</th><th>MTTR (hrs)</th><th>MTBF (hrs)</th></tr></thead><tbody>${groupRows}</tbody></table></div>`
+        : '<div class="empty-state"><div class="big">No downtime in this period</div></div>'}
+    </div>
+    ${topRows ? `<div class="panel-block"><h3>Top Problem Machines</h3><div class="table-scroll"><table class="matrix-table summary-table"><thead><tr><th>#</th><th>Machine</th><th>Failures</th><th>Downtime (hrs)</th><th>MTTR (hrs)</th></tr></thead><tbody>${topRows}</tbody></table></div></div>` : ''}
+    ${staffRows ? `<div class="panel-block"><h3>Technician Workload</h3><div class="table-scroll"><table class="matrix-table summary-table"><thead><tr><th>Name</th><th>Jobs</th><th>Breakdown</th><th>Preventive</th><th>Completed</th><th>Job hours</th></tr></thead><tbody>${staffRows}</tbody></table></div></div>` : ''}`;
+}
+
 async function loadDailyReport(){
   const date = document.getElementById('dailyDate').value || todayISO();
   try{
     const data = await apiGet('/reports/daily?date='+date);
     lastDailyData = data;
+    loadReportSummary('daily','mode=daily&date='+date);
     document.getElementById('dailyTotalLogs').textContent = data.totalLogs;
     document.getElementById('dailyPreventive').textContent = data.preventiveCount;
     document.getElementById('dailyBreakdown').textContent = data.breakdownCount;
@@ -2780,6 +2880,7 @@ async function loadMonthlyReport(){
   try{
     const data = await apiGet(`/reports/monthly?year=${year}&month=${parseInt(month)}`);
     lastMonthlyData = data;
+    loadReportSummary('monthly',`mode=monthly&year=${year}&month=${parseInt(month)}`);
     document.getElementById('monthlyTotalLogs').textContent = data.totalLogs;
     document.getElementById('monthlyPreventive').textContent = data.preventiveCount;
     document.getElementById('monthlyBreakdown').textContent = data.breakdownCount;
@@ -2814,6 +2915,7 @@ async function loadYearlyReport(){
   try{
     const data = await apiGet('/reports/yearly?year='+year);
     lastYearlyData = data;
+    loadReportSummary('yearly','mode=yearly&year='+year);
     document.getElementById('yearlyTotalLogs').textContent = data.totalLogs;
     document.getElementById('yearlyPreventive').textContent = data.preventiveCount;
     document.getElementById('yearlyBreakdown').textContent = data.breakdownCount;
@@ -3071,67 +3173,133 @@ async function downloadLogPDF(id){
 }
 window.downloadLogPDF = downloadLogPDF;
 
-async function downloadDailyPDF(){
-  if(!lastDailyData){ showToast('Load the report first'); return; }
+// ---- PDF helpers: small table renderer (no plugin needed) ----
+function pdfEnsure(doc, y, need){ if(y + need > 280){ doc.addPage(); return 18; } return y; }
+function pdfSection(doc, y, title){
+  y = pdfEnsure(doc, y, 20);
+  doc.setFont(undefined,'bold'); doc.setFontSize(11); doc.setTextColor(11,37,69);
+  doc.text(title, 14, y); doc.setDrawColor(11,37,69); doc.line(14, y+1.8, 196, y+1.8);
+  doc.setTextColor(20,20,20); return y + 8;
+}
+// cols: [{h:'Header', w:mm, a:'right'?}] rows: arrays of strings
+function pdfTable(doc, y, cols, rows){
+  const pad = 1.6, lh = 3.7;
+  const drawHead = (yy)=>{
+    doc.setFillColor(231,236,244); doc.rect(14, yy-4.2, 182, 6.4, 'F');
+    doc.setFont(undefined,'bold'); doc.setFontSize(8); doc.setTextColor(11,37,69);
+    let x = 14; cols.forEach(c=>{ doc.text(c.h, c.a==='right' ? x+c.w-pad : x+pad, yy, c.a==='right'?{align:'right'}:undefined); x += c.w; });
+    doc.setTextColor(20,20,20); doc.setFont(undefined,'normal'); return yy + 5;
+  };
+  y = pdfEnsure(doc, y, 18); y = drawHead(y);
+  doc.setFontSize(8);
+  rows.forEach(r=>{
+    const cells = r.map((v,i)=> doc.splitTextToSize(String(v===null||v===undefined?'':v), cols[i].w - pad*2));
+    const lines = Math.max(1, ...cells.map(c=>c.length));
+    const hgt = lines*lh + 2;
+    if(y + hgt > 282){ doc.addPage(); y = drawHead(18); doc.setFontSize(8); }
+    let x = 14;
+    cells.forEach((c,i)=>{ doc.text(c, cols[i].a==='right' ? x+cols[i].w-pad : x+pad, y, cols[i].a==='right'?{align:'right'}:undefined); x += cols[i].w; });
+    doc.setDrawColor(226,229,234); doc.line(14, y+hgt-3.2, 196, y+hgt-3.2);
+    y += hgt;
+  });
+  return y + 4;
+}
+function pdfKpis(doc, y, pairs){
+  doc.setFontSize(10);
+  pairs.forEach(([label,val],i)=>{
+    const col = i%2, x = 14 + col*92;
+    if(col===0 && i>0) y += 7;
+    doc.setFont(undefined,'bold'); doc.text(label+':', x, y);
+    doc.setFont(undefined,'normal'); doc.text(String(val), x+52, y);
+  });
+  return y + 9;
+}
+function pdfFooters(doc, label){
+  const n = doc.getNumberOfPages();
+  for(let i=1;i<=n;i++){
+    doc.setPage(i); doc.setFontSize(7.5); doc.setTextColor(120,120,120);
+    doc.text(label+' \u00b7 generated '+new Date().toLocaleString(), 14, 290);
+    doc.text('Page '+i+' of '+n, 196, 290, {align:'right'});
+  }
+  doc.setTextColor(20,20,20);
+}
+function pdfSummarySections(doc, y, d){
+  const t = d.totals;
+  y = pdfSection(doc, y, 'Downtime by Group');
+  const gs = d.groups.filter(g=>g.downtimeHours>0||g.failures>0);
+  if(gs.length){
+    y = pdfTable(doc, y, [{h:'Group',w:52},{h:'Machines',w:20,a:'right'},{h:'Failures',w:20,a:'right'},{h:'Downtime h',w:26,a:'right'},{h:'Share',w:18,a:'right'},{h:'MTTR h',w:22,a:'right'},{h:'MTBF h',w:24,a:'right'}],
+      gs.map(g=>[g.group,g.machines,g.failures,fmtH(g.downtimeHours),g.sharePct+'%',fmtH(g.mttr),fmtH(g.mtbf)]).concat([['TOTAL', t.machines, t.failures, fmtH(t.downtimeHours), '100%', fmtH(t.mttr), fmtH(t.mtbf)]]));
+  }else{ doc.setFontSize(9); doc.text('No downtime recorded in this period.', 14, y); y += 8; }
+  if(d.topMachines.length){
+    y = pdfSection(doc, y, 'Top Problem Machines (by downtime)');
+    y = pdfTable(doc, y, [{h:'#',w:8},{h:'Machine',w:70},{h:'Group',w:44},{h:'Failures',w:20,a:'right'},{h:'Downtime h',w:22,a:'right'},{h:'MTTR h',w:18,a:'right'}],
+      d.topMachines.map((m,i)=>[i+1, m.name+' ('+m.code+')', m.group, m.failures, fmtH(m.downtimeHours), fmtH(m.mttr)]));
+  }
+  y = pdfSection(doc, y, 'Preventive vs Breakdown');
+  const tot = t.preventive + t.breakdown;
+  y = pdfTable(doc, y, [{h:'Type',w:60},{h:'Jobs',w:30,a:'right'},{h:'Share',w:30,a:'right'}],
+    [['Preventive', t.preventive, tot?Math.round(t.preventive/tot*100)+'%':'-'],['Breakdown', t.breakdown, tot?Math.round(t.breakdown/tot*100)+'%':'-']]);
+  if(d.breakdowns.length){
+    y = pdfSection(doc, y, 'Breakdown Details' + (d.breakdowns.length>=60 ? ' (60 longest)' : ''));
+    y = pdfTable(doc, y, [{h:'Date',w:19},{h:'Machine',w:36},{h:'Issue',w:42},{h:'Action taken',w:42},{h:'Hrs',w:11,a:'right'},{h:'Technician',w:20},{h:'Status',w:12}],
+      d.breakdowns.map(b=>[b.date.slice(5), b.name+' ('+b.code+')', b.findings, b.actions, fmtH(b.hours), b.technician, b.status]));
+  }
+  if(d.staff.length){
+    y = pdfSection(doc, y, 'Technician Workload');
+    y = pdfTable(doc, y, [{h:'Name',w:62},{h:'Discipline',w:28},{h:'Jobs',w:18,a:'right'},{h:'Breakdown',w:24,a:'right'},{h:'Preventive',w:24,a:'right'},{h:'Done',w:14,a:'right'},{h:'Hrs',w:12,a:'right'}],
+      d.staff.map(p=>[p.name,p.discipline,p.jobs,p.breakdown,p.preventive,p.completed,fmtH(p.hours)]));
+  }
+  if(d.parts.length){
+    y = pdfSection(doc, y, 'Parts / Items Used');
+    y = pdfTable(doc, y, [{h:'Date',w:19},{h:'Machine',w:60},{h:'Parts / items',w:103}], d.parts.map(p=>[p.date.slice(5), p.name+' ('+p.code+')', p.parts]));
+  }
+  return y;
+}
+async function buildReportPDF(kind, title, subtitle, data, chartId, fileName, extra){
   if(typeof window.jspdf === 'undefined'){ showToast('PDF library failed to load. Check your internet connection.'); return; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF();
+  let sum = window.__sum[kind];
+  if(!sum){ const q = {daily:'mode=daily&date='+data.date, monthly:`mode=monthly&year=${data.year}&month=${parseInt(data.month)}`, yearly:'mode=yearly&year='+data.year}[kind]; sum = await loadReportSummary(kind, q); }
+  await pdfHeader(doc, title, subtitle);
+  let y = 48;
+  const t = sum && sum.totals;
+  y = pdfKpis(doc, y, [['Total logs', data.totalLogs], ['Preventive', data.preventiveCount], ['Breakdown', data.breakdownCount], ['Total downtime (hrs)', data.totalDowntime.toFixed(1)]]
+    .concat(t ? [['Failures', t.failures], ['MTTR / MTBF (hrs)', fmtH(t.mttr)+' / '+fmtH(t.mtbf)], ['Pending / Completed', t.pending+' / '+t.completed], ['Machines down now', t.machinesDown+' of '+t.machines]] : []));
+  if(chartId){
+    y = pdfEnsure(doc, y, 90);
+    y = addChartImage(doc, chartId, y);
+  }
+  if(sum) y = pdfSummarySections(doc, y, sum);
+  if(extra) y = extra(doc, y);
+  pdfFooters(doc, title);
+  doc.save(fileName);
+}
+
+async function downloadDailyPDF(){
+  if(!lastDailyData){ showToast('Load the report first'); return; }
   const data = lastDailyData;
-  await pdfHeader(doc, 'Daily Maintenance Report', `Date: ${fmtDate(data.date)}`);
-  let y = 46;
-  doc.setFontSize(11);
-  [['Total Logs', data.totalLogs], ['Preventive', data.preventiveCount], ['Breakdown', data.breakdownCount], ['Total Downtime (hrs)', data.totalDowntime.toFixed(1)]].forEach(([label,val])=>{
-    doc.setFont(undefined,'bold'); doc.text(label+':', 14, y);
-    doc.setFont(undefined,'normal'); doc.text(String(val), 90, y);
-    y += 8;
+  await buildReportPDF('daily','Daily Maintenance Report',`Date: ${fmtDate(data.date)}`, data, 'dailyChart', `daily-report-${data.date}.pdf`, (doc,y)=>{
+    if(!data.logs.length) return y;
+    y = pdfSection(doc, y, 'All Logs on This Date');
+    return pdfTable(doc, y, [{h:'Machine',w:44},{h:'Type',w:20},{h:'Issue',w:48},{h:'Action taken',w:48},{h:'Technician',w:22}],
+      data.logs.map(l=>[l.machineName+' ('+l.machineCode+')', l.logType+' / '+l.status, l.findings, l.actionsTaken, l.technician]));
   });
-  y = addChartImage(doc, 'dailyChart', y+4);
-  doc.setFont(undefined,'bold'); doc.text('Logs:', 14, y); y += 8;
-  doc.setFont(undefined,'normal'); doc.setFontSize(9);
-  data.logs.forEach(l=>{
-    if(y > 270){ doc.addPage(); y = 20; }
-    doc.text(`${l.machineName} (${l.machineCode}) \u2014 ${l.logType}, ${l.status}, ${l.technician}`, 14, y);
-    y += 6;
-  });
-  doc.save(`daily-report-${data.date}.pdf`);
 }
 window.downloadDailyPDF = downloadDailyPDF;
 
 async function downloadMonthlyPDF(){
   if(!lastMonthlyData){ showToast('Load the report first'); return; }
-  if(typeof window.jspdf === 'undefined'){ showToast('PDF library failed to load. Check your internet connection.'); return; }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
   const data = lastMonthlyData;
-  await pdfHeader(doc, 'Monthly Maintenance Report', `${data.year}-${data.month}`);
-  let y = 46;
-  doc.setFontSize(11);
-  [['Total Logs', data.totalLogs], ['Preventive', data.preventiveCount], ['Breakdown', data.breakdownCount], ['Total Downtime (hrs)', data.totalDowntime.toFixed(1)]].forEach(([label,val])=>{
-    doc.setFont(undefined,'bold'); doc.text(label+':', 14, y);
-    doc.setFont(undefined,'normal'); doc.text(String(val), 90, y);
-    y += 8;
-  });
-  addChartImage(doc, 'monthlyChart', y+4);
-  doc.save(`monthly-report-${data.year}-${data.month}.pdf`);
+  await buildReportPDF('monthly','Monthly Maintenance Report',`${data.year}-${data.month}`, data, 'monthlyChart', `monthly-report-${data.year}-${data.month}.pdf`);
 }
 window.downloadMonthlyPDF = downloadMonthlyPDF;
 
 async function downloadYearlyPDF(){
   if(!lastYearlyData){ showToast('Load the report first'); return; }
-  if(typeof window.jspdf === 'undefined'){ showToast('PDF library failed to load. Check your internet connection.'); return; }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
   const data = lastYearlyData;
-  await pdfHeader(doc, 'Yearly Maintenance Report', `Year: ${data.year}`);
-  let y = 46;
-  doc.setFontSize(11);
-  [['Total Logs', data.totalLogs], ['Preventive', data.preventiveCount], ['Breakdown', data.breakdownCount], ['Total Downtime (hrs)', data.totalDowntime.toFixed(1)]].forEach(([label,val])=>{
-    doc.setFont(undefined,'bold'); doc.text(label+':', 14, y);
-    doc.setFont(undefined,'normal'); doc.text(String(val), 90, y);
-    y += 8;
-  });
-  addChartImage(doc, 'yearlyChart', y+4);
-  doc.save(`yearly-report-${data.year}.pdf`);
+  await buildReportPDF('yearly','Yearly Maintenance Report',`Year: ${data.year}`, data, 'yearlyChart', `yearly-report-${data.year}.pdf`);
 }
 window.downloadYearlyPDF = downloadYearlyPDF;
 
@@ -3243,4 +3411,53 @@ if('serviceWorker' in navigator){
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(()=>{});
   });
-      }
+}
+
+// ============ LIVE FILTERS ============
+// Every filter applies the moment it changes. Text boxes wait 300 ms after the
+// last keystroke; the Filters badge and highlighted boxes show what is active.
+(function(){
+  function debounce(fn, ms){ let t; return function(){ clearTimeout(t); t = setTimeout(fn, ms); }; }
+  const MAP = [
+    // [control id, action, isText]
+    ['machineSearch',       ()=>renderMachines(), true],
+    ['machineStatusFilter', ()=>renderMachines()],
+    ['logSearch',           ()=>renderLogsPage(), true],
+    ['logMachineFilter',    ()=>renderLogsPage()],
+    ['logTypeFilter',       ()=>renderLogsPage()],
+    ['logStatusFilter',     ()=>renderLogsPage()],
+    ['logFilterFrom',       ()=>renderLogsPage()],
+    ['logFilterTo',         ()=>renderLogsPage()],
+    ['dailyDate',           ()=>loadDailyReport()],
+    ['monthlyDate',         ()=>loadMonthlyReport()],
+    ['yearlyDate',          ()=>{ const v=document.getElementById('yearlyDate').value; if(/^\d{4}$/.test(v)) loadYearlyReport(); }, true],
+    ['perfPeriod',          ()=>{ if(document.getElementById('perfPeriod').value!=='custom') loadPerformance(); }],
+    ['perfFrom',            ()=>{ if(document.getElementById('perfFrom').value && document.getElementById('perfTo').value) loadPerformance(); }],
+    ['perfTo',              ()=>{ if(document.getElementById('perfFrom').value && document.getElementById('perfTo').value) loadPerformance(); }],
+    ['perfDiscipline',      ()=>loadPerformance()]
+  ];
+  const GROUPS = { machinesFilterBar:'machinesFilterBar', logsFilterBar:'logsFilterBar' };
+  function markActive(){
+    ['machinesFilterBar','logsFilterBar'].forEach(id=>{
+      const bar = document.getElementById(id); if(!bar) return;
+      let n = 0;
+      bar.querySelectorAll('input,select').forEach(el=>{
+        let on = false;
+        if(el.tagName==='SELECT') on = el.value && el.value!=='All' && el.selectedIndex>0;
+        else on = !!el.value;
+        el.classList.toggle('filter-active', !!on); if(on) n++;
+      });
+      const btn = bar.previousElementSibling && bar.previousElementSibling.querySelector('.filters-toggle-btn');
+      if(btn) btn.innerHTML = '&#9881; Filters' + (n ? ' <span class="filter-badge">'+n+'</span>' : '');
+    });
+  }
+  MAP.forEach(([id, fn, isText])=>{
+    const el = document.getElementById(id); if(!el) return;
+    const run = ()=>{ markActive(); try{ const r = fn(); if(r && r.catch) r.catch(()=>{}); }catch(e){} };
+    if(isText) el.addEventListener('input', debounce(run, 300));
+    else el.addEventListener('change', run);
+  });
+  const cf = document.getElementById('categoryFilter'); if(cf) cf.addEventListener('change', markActive);
+  document.addEventListener('click', e=>{ if(e.target.closest && e.target.closest('.search-bar button')) setTimeout(markActive, 0); });
+  window.markFilterBadges = markActive;
+})();
