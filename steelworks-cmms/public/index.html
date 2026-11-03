@@ -976,8 +976,7 @@
     <h3>Report Breakdown</h3>
     <p class="dt-hint">Machine just stopped? Report it now &mdash; the supervisors are alerted straight away and the repair details can be added later.</p>
     <label for="dtMachine">Machine</label>
-    <input id="dtMachine" list="dtMachineList" placeholder="Type a machine name or code..." required>
-    <datalist id="dtMachineList"></datalist>
+    <input id="dtMachine" autocomplete="off" placeholder="Type a machine name or code..." required>
     <label for="dtSymptom">What happened?</label>
     <textarea id="dtSymptom" rows="3" placeholder="e.g. Hydraulic oil leaking at the stripper lock" required></textarea>
     <div class="dt-row">
@@ -1000,4 +999,4 @@
 <script src="/app.js"></script>
 <script src="/kanban.js"></script>
 </body>
-  </html>
+          </html>
