@@ -478,56 +478,98 @@ module.exports = function (app, h) {
       const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
       const title = `${org && org.name ? org.name : ''} - Preventive Maintenance ${year}${group ? ' - ' + group : ''}`;
 
-      // 1. chart: machines down, weeks across
-      const ws = wb.addWorksheet('PM Chart', { views: [{ state: 'frozen', xSplit: 3, ySplit: 4 }] });
-      const jan1 = new Date(year + '-01-01T00:00:00Z');
-      const dow = (jan1.getUTCDay() + 6) % 7;
-      const first = new Date(jan1.getTime() - dow * 86400000);
-      const nWeeks = Math.floor((new Date(year + '-12-31T00:00:00Z') - first) / 86400000 / 7) + 1;
+      // 1. chart: machines down, every day of the year across
+      const ws = wb.addWorksheet('PM Chart', { views: [{ state: 'frozen', xSplit: 3, ySplit: 5 }] });
+      const DAYN0 = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+      const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+      const yStart = Date.UTC(year, 0, 1);
+      const nDays = Math.round((Date.UTC(year, 11, 31) - yStart) / 86400000) + 1;
       ws.getCell('A1').value = title; ws.getCell('A1').font = { bold: true, size: 14, color: { argb: NAVY } };
-      ws.getCell('A2').value = 'Each column is a week (starting Monday). Letters: W weekly, M monthly, Q quarterly, H half-yearly, A annual, S annual at shutdown. Green = done, red = overdue.';
+      ws.getCell('A2').value = 'Every column is one day. W weekly, M monthly, Q quarterly, H half-yearly, A annual, S annual at shutdown. Green = done, red = overdue. Weekends shaded.';
       ws.getCell('A2').font = { italic: true, size: 9 };
-      ws.getRow(3).values = ['Code', 'Machine', 'Group'];
+      ws.getRow(3).values = ['', '', ''];
       ws.getRow(4).values = ['', '', ''];
-      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      let lastMonth = -1;
-      for (let w = 0; w < nWeeks; w++) {
-        const ds = new Date(first.getTime() + w * 7 * 86400000);
-        const c = 4 + w;
-        const mo = ds.getUTCMonth() + (ds.getUTCFullYear() < year ? -12 : 0);
-        if (ds.getUTCFullYear() === year && ds.getUTCMonth() !== lastMonth) { ws.getRow(3).getCell(c).value = monthNames[ds.getUTCMonth()]; lastMonth = ds.getUTCMonth(); }
-        ws.getRow(4).getCell(c).value = String(ds.getUTCDate()).padStart(2, '0') + '/' + String(ds.getUTCMonth() + 1).padStart(2, '0');
-        ws.getColumn(c).width = 5.2;
+      ws.getRow(5).values = ['Code', 'Machine', 'Group'];
+      for (let n = 0; n < nDays; n++) {
+        const d = new Date(yStart + n * 86400000);
+        const c = 4 + n;
+        if (d.getUTCDate() === 1) ws.getRow(3).getCell(c).value = monthNames[d.getUTCMonth()];
+        ws.getRow(4).getCell(c).value = DAYN0[d.getUTCDay()];
+        ws.getRow(5).getCell(c).value = d.getUTCDate();
+        ws.getColumn(c).width = 3.1;
       }
       ws.getColumn(1).width = 12; ws.getColumn(2).width = 34; ws.getColumn(3).width = 20;
-      head(ws, 3); head(ws, 4);
-      ws.getRow(4).font = { bold: true, size: 8, color: { argb: 'FFFFFFFF' } };
+      head(ws, 3); head(ws, 4); head(ws, 5);
+      ws.getRow(4).font = { bold: true, size: 7, color: { argb: 'FFFFFFFF' } };
+      ws.getRow(5).font = { bold: true, size: 7, color: { argb: 'FFFFFFFF' } };
       const byM = new Map();
       rows.forEach(r => { if (!byM.has(r.machine_id)) byM.set(r.machine_id, { r0: r, v: [] }); byM.get(r.machine_id).v.push(r); });
-      let rowNo = 5;
+      let rowNo = 6;
       for (const m of byM.values()) {
         const row = ws.getRow(rowNo++);
         row.getCell(1).value = m.r0.machine_code; row.getCell(2).value = m.r0.machine_name; row.getCell(3).value = m.r0.machine_group || '';
-        const weeks = new Map();
+        const days = new Map();
         m.v.forEach(v => {
-          const w = Math.floor((new Date(v.due_date + 'T00:00:00Z') - first) / 86400000 / 7);
-          if (!weeks.has(w)) weeks.set(w, []); weeks.get(w).push(v);
+          const n = Math.round((new Date(v.due_date + 'T00:00:00Z') - yStart) / 86400000);
+          if (!days.has(n)) days.set(n, []); days.get(n).push(v);
         });
-        for (const [w, list] of weeks) {
+        for (const [n, list] of days) {
           list.sort((a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level]);
-          const cell = row.getCell(4 + w);
+          const cell = row.getCell(4 + n);
           cell.value = list.map(x => x.level).join('');
-          const open = list.filter(x => x.status === 'Planned' || x.status === 'In progress');
-          const overdue = open.some(x => x.due_date < td);
+          const overdue = list.some(x => (x.status === 'Planned' || x.status === 'In progress') && x.due_date < td);
           const allDone = list.every(x => x.status === 'Done' || x.status === 'Skipped');
           cell.fill = solid(overdue ? 'FFFFC7CE' : allDone ? 'FFC6EFCE' : FILL[list[0].level]);
-          cell.font = { bold: true, size: 9, color: { argb: overdue ? 'FF9C0006' : 'FF1F2937' } };
+          cell.font = { bold: true, size: 7, color: { argb: overdue ? 'FF9C0006' : 'FF1F2937' } };
           cell.alignment = { horizontal: 'center' };
-          cell.border = { top: thin, left: thin, bottom: thin, right: thin };
         }
       }
-      ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: Math.max(4, rowNo - 1), column: 3 } };
+      ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: Math.max(5, rowNo - 1), column: 3 } };
       ws.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 8 };
+
+      // 2b. one sheet per month, every day as a column
+      const DAYN = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+      const MFULL = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      for (let mo = 0; mo < 12; mo++) {
+        const ms = year + '-' + String(mo + 1).padStart(2, '0');
+        const monthRows = rows.filter(r => r.due_date.slice(0, 7) === ms);
+        if (!monthRows.length) continue;
+        const nD = new Date(Date.UTC(year, mo + 1, 0)).getUTCDate();
+        const wm = wb.addWorksheet(MFULL[mo] + ' ' + year, { views: [{ state: 'frozen', xSplit: 3, ySplit: 3 }] });
+        wm.getCell('A1').value = `${title} - ${MFULL[mo]} ${year} (by day)`; wm.getCell('A1').font = { bold: true, size: 13, color: { argb: NAVY } };
+        wm.getRow(2).values = ['Code', 'Machine', 'Group']; wm.getRow(3).values = ['', '', ''];
+        for (let n = 1; n <= nD; n++) {
+          const wd = new Date(Date.UTC(year, mo, n)).getUTCDay();
+          wm.getRow(2).getCell(3 + n).value = DAYN[wd]; wm.getRow(3).getCell(3 + n).value = n; wm.getColumn(3 + n).width = 4.6;
+        }
+        wm.getColumn(1).width = 12; wm.getColumn(2).width = 34; wm.getColumn(3).width = 20;
+        head(wm, 2); head(wm, 3);
+        const mm = new Map();
+        monthRows.forEach(r => { if (!mm.has(r.machine_id)) mm.set(r.machine_id, { r0: r, v: [] }); mm.get(r.machine_id).v.push(r); });
+        const perDay = new Array(nD + 1).fill(0);
+        let rn = 4;
+        for (const m of mm.values()) {
+          const row = wm.getRow(rn++);
+          row.getCell(1).value = m.r0.machine_code; row.getCell(2).value = m.r0.machine_name; row.getCell(3).value = m.r0.machine_group || '';
+          const days = new Map();
+          m.v.forEach(v => { const n = parseInt(v.due_date.slice(8), 10); if (!days.has(n)) days.set(n, []); days.get(n).push(v); });
+          for (const [n, list] of days) {
+            list.sort((a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level]);
+            perDay[n]++;
+            const cell = row.getCell(3 + n);
+            cell.value = list.map(x => x.level).join('');
+            const overdue = list.some(x => (x.status === 'Planned' || x.status === 'In progress') && x.due_date < td);
+            const allDone = list.every(x => x.status === 'Done' || x.status === 'Skipped');
+            cell.fill = solid(overdue ? 'FFFFC7CE' : allDone ? 'FFC6EFCE' : FILL[list[0].level]);
+            cell.font = { bold: true, size: 9, color: { argb: overdue ? 'FF9C0006' : 'FF1F2937' } };
+            cell.alignment = { horizontal: 'center' };
+            cell.border = { top: thin, left: thin, bottom: thin, right: thin };
+          }
+        }
+        const tot = wm.getRow(rn + 1); tot.getCell(2).value = 'Machines serviced that day'; tot.font = { bold: true };
+        for (let n = 1; n <= nD; n++) tot.getCell(3 + n).value = perDay[n] || '';
+        wm.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
+      }
 
       // 2. flat list
       const wl = wb.addWorksheet('PM Schedule', { views: [{ state: 'frozen', ySplit: 1 }] });
