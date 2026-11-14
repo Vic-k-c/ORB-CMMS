@@ -1,874 +1,1097 @@
-:root{
-  --navy:#0B2545;
-  --navy-2:#13315C;
-  --navy-light:#1F4E79;
-  --navy-pale:#EAF0F8;
-  --white:#FFFFFF;
-  --bg:#F5F7FA;
-  --grey:#6B7280;
-  --grey-light:#E2E5EA;
-  --grey-lighter:#F0F2F5;
-  --red:#B3261E;
-  --red-pale:#FBEAE9;
-  --amber:#B8860B;
-  --amber-pale:#FBF3E0;
-  --text:#1B2430;
-}
-*{box-sizing:border-box;}
-html,body{margin:0;padding:0;}
-body{background:linear-gradient(180deg,var(--navy-pale) 0%,var(--bg) 340px);color:var(--text);font-family:'IBM Plex Sans',sans-serif;min-height:100vh;overflow-x:hidden;}
-.app{max-width:1280px;margin:0 auto;padding:0 20px 60px;}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>STEELWORKS CMMS</title>
+<link id="faviconLink" rel="icon" type="image/png" href="/favicon-64.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<meta name="apple-mobile-web-app-title" content="ORB CMMS">
+<meta name="theme-color" content="#0B2545">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
 
-.topbar-accent{height:6px;background:var(--navy);}
+<!-- ============ LOGIN GATE ============ -->
+<div id="loginGate" class="login-gate">
+  <div class="login-card">
+    <img id="loginRememberedLogo" class="login-remembered-logo" style="display:none;" alt="">
+    <div class="login-cmms-tag">CMMS &middot; Computerized Maintenance Management System</div>
+    <p class="hint">Sign in with your plant account.</p>
+    <form id="loginForm">
+      <label for="loginOrgCode">Organization Code</label>
+      <input id="loginOrgCode" placeholder="e.g. ZSF" autocomplete="off" style="text-transform:uppercase;">
+      <label for="loginUsername">Username</label>
+      <input id="loginUsername" required autocomplete="username">
+      <label for="loginPassword">Password</label>
+      <input id="loginPassword" type="password" required autocomplete="current-password">
+      <div class="form-error" id="loginError" style="display:none;"></div>
+      <button type="submit" class="btn-primary" style="width:100%;margin-top:18px;">Log In</button>
+    </form>
+  </div>
+</div>
 
-/* ============ LOGIN GATE ============ */
-.login-gate{
-  min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;
-  background:linear-gradient(rgba(11,37,69,0.55),rgba(11,37,69,0.55)),url('/login-bg.jpg');
-  background-size:cover;background-position:center;
-}
-.login-card{background:var(--white);border-radius:10px;padding:36px 34px;max-width:380px;width:100%;box-shadow:0 20px 50px rgba(0,0,0,0.45);}
-.login-remembered-logo{display:block;max-height:56px;max-width:100%;object-fit:contain;margin:0 auto 18px;}
-.login-note{margin-top:18px;font-size:12px;color:var(--grey);background:var(--navy-pale);padding:10px 12px;border-radius:6px;line-height:1.5;}
-#loginForm label{margin-top:14px;}
-#loginForm label:first-of-type{margin-top:16px;}
-.input-error{border-color:var(--red) !important;box-shadow:0 0 0 1px var(--red);}
+<!-- ============ SETTINGS PAGE (every account, including Super Admin) ============ -->
+<div id="settingsPage" class="settings-page" style="display:none;">
+  <div class="settings-bar">
+    <button type="button" class="btn-ghost" onclick="closeSettings()">&larr; Back</button>
+    <h1 class="settings-title">Settings</h1>
+  </div>
+  <div class="settings-body">
 
-/* ============ HEADER ============ */
-header{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--grey-light);flex-wrap:wrap;gap:10px 14px;background:var(--white);}
-.plant-id{display:flex;align-items:center;gap:10px;min-width:0;}
-.hamburger{display:none;flex-shrink:0;background:none;border:none;font-size:22px;color:var(--navy);cursor:pointer;padding:4px 6px;}
-.mobile-user-info{display:none;}
-.brand-icon{font-size:clamp(18px,4vw,26px);flex-shrink:0;}
-.header-logo{height:clamp(28px,6vw,44px);max-width:min(45vw,220px);width:auto;object-fit:contain;flex-shrink:0;}
-.cmms-badge{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:600;letter-spacing:0.6px;color:var(--grey);background:var(--grey-lighter);border:1px solid var(--grey-light);padding:2px 7px;border-radius:10px;margin-top:3px;}
-.login-cmms-tag{text-align:center;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.4px;color:var(--grey);margin-bottom:16px;}
-h1{font-family:'Oswald',sans-serif;font-weight:700;font-size:clamp(16px,3.4vw,24px);letter-spacing:0.5px;margin:0;text-transform:uppercase;color:var(--navy);white-space:nowrap;}
-h1 span{color:var(--red);}
-h1 small{color:var(--grey);font-size:0.55em;letter-spacing:1px;margin-left:4px;}
-.subtitle{font-family:'IBM Plex Mono',monospace;color:var(--grey);font-size:10.5px;letter-spacing:0.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.header-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-left:auto;}
-.topnav{display:flex;gap:4px;flex-wrap:wrap;}
-.topnav button{background:transparent;border:none;color:var(--grey);font-family:'IBM Plex Sans',sans-serif;font-size:14px;padding:9px 14px;cursor:pointer;border-radius:5px;white-space:nowrap;}
-.topnav button:hover{color:var(--navy);background:var(--navy-pale);}
-.topnav button.active{color:var(--white);background:var(--navy);font-weight:600;}
-.auth-buttons{display:flex;align-items:center;gap:8px;flex-shrink:0;}
-.user-chip{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--navy);background:var(--navy-pale);padding:6px 10px;border-radius:14px;white-space:nowrap;max-width:34vw;overflow:hidden;text-overflow:ellipsis;}
-/* The name in the header doubles as the way into Settings - a quiet gear instead of a loud button. */
-.user-chip-btn{border:none;cursor:pointer;}
-.user-chip-btn::after{content:'\2699\FE0E';margin-left:7px;opacity:.5;font-size:12px;}
-.user-chip-btn:hover{background:var(--grey-light);}
-.user-chip-btn:hover::after{opacity:1;}
-.btn-outline{background:transparent;border:1px solid var(--grey-light);color:var(--text);padding:8px 14px;border-radius:5px;font-size:12.5px;cursor:pointer;white-space:nowrap;}
-.btn-outline:hover{border-color:var(--grey);}
+    <div class="panel settings-card">
+      <h2>Profile</h2>
+      <form id="profileForm">
+        <label for="profileName">Full name</label>
+        <input id="profileName" required maxlength="80" autocomplete="name">
+        <label for="profileUsername">Username</label>
+        <input id="profileUsername" required maxlength="40" autocomplete="username" autocapitalize="off" spellcheck="false">
+        <div class="label-note" style="margin-top:6px;">This is what you log in with. Changing it asks for your password.</div>
+        <div class="settings-readonly">
+          <div><span>Role</span><b id="profileRole"></b></div>
+          <div><span>Organization</span><b id="profileOrg"></b></div>
+        </div>
+        <div class="label-note" style="margin-top:12px;">A new name applies from now on. Logs you already submitted keep the name they were saved with.</div>
+        <div class="form-error" id="profileError" style="display:none;"></div>
+        <div class="form-actions"><button type="submit" class="btn-primary" id="profileSaveBtn">Save profile</button></div>
+      </form>
+    </div>
 
-/* ============ VIEWS ============ */
-.view{display:none;}
-.view.active{display:block;animation:fadein .18s ease;}
-@keyframes fadein{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+    <div class="panel settings-card">
+      <h2>Change password</h2>
+      <form id="passwordForm">
+        <label for="pwCurrent">Current password</label>
+        <input id="pwCurrent" type="password" required autocomplete="current-password">
+        <label for="pwNew">New password</label>
+        <input id="pwNew" type="password" required autocomplete="new-password">
+        <div class="label-note" style="margin-top:6px;">At least 8 characters.</div>
+        <label for="pwConfirm">Confirm new password</label>
+        <input id="pwConfirm" type="password" required autocomplete="new-password">
+        <div class="form-error" id="passwordError" style="display:none;"></div>
+        <div class="form-actions"><button type="submit" class="btn-primary" id="passwordSaveBtn">Change password</button></div>
+      </form>
+    </div>
 
-.page-head{display:flex;justify-content:space-between;align-items:center;margin:24px 0 20px;flex-wrap:wrap;gap:12px;}
-.page-title{font-family:'Oswald',sans-serif;text-transform:uppercase;font-size:22px;margin:0;letter-spacing:0.4px;color:var(--navy);}
+    <div class="panel settings-card">
+      <h2>App</h2>
+      <div class="label-note" id="installStatus"></div>
+      <div class="form-actions" style="margin-top:14px;"><button type="button" class="btn-outline" id="installAppBtn" onclick="installApp()">Install app</button></div>
+    </div>
 
-.btn-primary{background:var(--navy);color:var(--white);border:none;font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;font-size:13.5px;padding:11px 20px;border-radius:5px;cursor:pointer;}
-.btn-primary.small{padding:8px 16px;font-size:12.5px;}
-.btn-primary:hover{background:var(--navy-light);}
-.btn-primary:disabled{opacity:0.5;cursor:not-allowed;}
-.btn-ghost{background:transparent;border:1px solid var(--grey-light);color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:13px;padding:10px 16px;border-radius:5px;cursor:pointer;}
-.btn-ghost:hover{border-color:var(--grey);}
-.btn-danger{background:var(--red-pale);color:var(--red);border:1px solid var(--red);font-size:12px;padding:7px 12px;border-radius:5px;cursor:pointer;}
+  </div>
+</div>
 
-/* ============ STAT GRID (dashboard) ============ */
-.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px;}
-.stat-card-mini{background:var(--white);border:1px solid var(--grey-light);border-left:4px solid var(--navy-light);border-radius:8px;padding:18px 20px;}
-.stat-card-mini.alert{border-left:4px solid var(--red);}
-.stat-card-mini.warn{border-left:4px solid var(--amber);}
-.stat-icon{font-size:19px;margin-bottom:6px;}
-.stat-value{font-family:'Oswald',sans-serif;font-size:32px;color:var(--navy);font-weight:700;line-height:1;}
-.stat-card-mini.alert .stat-value{color:var(--red);}
-.stat-card-mini.warn .stat-value{color:var(--amber);}
-.stat-label{font-family:'IBM Plex Sans',sans-serif;font-size:13px;color:var(--text);font-weight:600;margin-top:6px;}
-.stat-sub{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--grey);margin-top:2px;}
+<!-- ============ SUPER ADMIN SHELL (no organization - manages organizations) ============ -->
+<div class="app-shell" id="superAdminShell" style="display:none;">
+<div class="topbar-accent"></div>
+<div class="app">
+  <header>
+    <div class="plant-id">
+      <span class="brand-icon">&#9881;&#65039;</span>
+      <div>
+        <h1>STEEL<span>WORKS</span> <small>CMMS</small></h1>
+        <div class="subtitle">SUPER ADMIN &mdash; ORGANIZATION MANAGEMENT</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="auth-buttons">
+        <button type="button" class="user-chip user-chip-btn" id="superAdminUserChip" title="Settings" onclick="openSettings()"></button>
+        <button class="btn-outline" onclick="logout()">Log Out</button>
+      </div>
+    </div>
+  </header>
 
-/* ============ CHARTS ============ */
-.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;}
-.chart-panel{background:var(--white);border:1px solid var(--grey-light);border-radius:8px;padding:20px;}
-.chart-panel h3{font-family:'Oswald',sans-serif;text-transform:uppercase;font-size:14px;margin:0 0 14px;letter-spacing:0.4px;color:var(--navy);}
-.chart-box{position:relative;height:240px;}
-.chart-box.small{height:180px;max-width:340px;}
+  <div class="page-head">
+    <h2 class="page-title">Organizations</h2>
+    <button class="btn-primary" onclick="openCreateOrgForm()">+ New Organization</button>
+  </div>
+  <div id="orgsList"></div>
+  <div class="empty-state" id="orgsEmpty" style="display:none;">
+    <div class="big">No organizations yet</div>
+    <div>Create the first one to get started.</div>
+  </div>
 
-/* ============ PANEL BLOCKS ============ */
-.panel-block{background:var(--white);border:1px solid var(--grey-light);border-radius:8px;padding:20px 22px;margin-bottom:22px;}
-.panel-block-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
-.panel-block-head h3{font-family:'Oswald',sans-serif;text-transform:uppercase;font-size:14px;margin:0;color:var(--navy);}
-.panel-block-head a{color:var(--navy);font-size:12.5px;text-decoration:none;font-family:'IBM Plex Mono',monospace;}
-.panel-block-head a:hover{text-decoration:underline;}
+  <div class="panel" id="createOrgPanel" style="display:none;max-width:560px;margin-top:20px;">
+    <h2>New Organization</h2>
+    <div class="hint">This creates the organization and its first Management account in one step.</div>
+    <form id="createOrgForm">
+      <label for="newOrgName">Organization Name</label>
+      <input id="newOrgName" required placeholder="e.g. Acme Fabricators Ltd">
+      <label for="newOrgCode">Organization Code <span class="label-note">(used at login, e.g. ACME)</span></label>
+      <input id="newOrgCode" required placeholder="e.g. ACME" style="text-transform:uppercase;">
+      <label for="newOrgTagline">Tagline <span class="label-note">(optional)</span></label>
+      <input id="newOrgTagline" placeholder="e.g. Precision Metal Works">
+      <label for="newOrgAdminName">First Admin's Full Name</label>
+      <input id="newOrgAdminName" required>
+      <label for="newOrgAdminUsername">First Admin's Username</label>
+      <input id="newOrgAdminUsername" required autocomplete="off">
+      <label for="newOrgAdminPassword">First Admin's Password</label>
+      <input id="newOrgAdminPassword" type="password" required autocomplete="new-password">
+      <div class="form-error" id="createOrgError" style="display:none;"></div>
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">Create Organization</button>
+        <button type="button" class="btn-ghost" onclick="closeCreateOrgForm()">Cancel</button>
+      </div>
+    </form>
+  </div>
 
-/* ============ RECENT LOG ROW ============ */
-.recent-log-row{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:var(--grey-lighter);border-radius:6px;margin-bottom:8px;flex-wrap:wrap;gap:8px;}
-.recent-log-row.clickable{cursor:pointer;transition:background .12s;}
-.recent-log-row.clickable:hover{background:var(--navy-pale);}
-.recent-log-left{display:flex;flex-direction:column;gap:2px;}
-.recent-log-machine{font-weight:600;font-size:13.5px;}
-.recent-log-meta{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--grey);}
-.badge{font-family:'Oswald',sans-serif;font-size:10.5px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;padding:4px 12px;border-radius:14px;white-space:nowrap;}
-.badge.completed, .badge.running{background:var(--navy-pale);color:var(--navy);}
-.badge.pending{background:var(--grey-lighter);color:var(--grey);border:1px solid var(--grey-light);}
-.badge.down{background:var(--red-pale);color:var(--red);}
-.badge.standby{background:var(--grey-lighter);color:var(--grey);border:1px solid var(--grey-light);}
-.badge.reviewed{background:var(--navy);color:var(--white);}
+  <div class="panel" id="editOrgPanel" style="display:none;max-width:560px;margin-top:20px;">
+    <h2>Edit Organization</h2>
+    <input type="hidden" id="editOrgId">
+    <form id="editOrgForm">
+      <label for="editOrgName">Organization Name</label>
+      <input id="editOrgName" required>
+      <label for="editOrgActive">Status</label>
+      <select id="editOrgActive">
+        <option value="1">Active</option>
+        <option value="0">Deactivated</option>
+      </select>
+      <div class="label-note" style="margin-top:6px;">Deactivating blocks this organization's users immediately, including anyone currently logged in.</div>
+      <div class="form-error" id="editOrgError" style="display:none;"></div>
+      <div class="form-actions">
+        <button type="submit" class="btn-primary">Save Changes</button>
+        <button type="button" class="btn-ghost" onclick="closeEditOrgForm()">Cancel</button>
+      </div>
+    </form>
 
-/* ============ EXPORT BAR ============ */
+    <h2 style="margin-top:26px;font-size:15px;">App Icon</h2>
+    <div class="label-note" style="margin-bottom:10px;">Shown when this organization's users install the app, and as their browser tab icon. A square PNG or JPG works best. Without one, the ORB CMMS icon is used.</div>
+    <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+      <img id="editOrgIconPreview" class="org-icon-preview" alt="Current app icon">
+      <div style="flex:1;min-width:200px;">
+        <div id="editOrgIconStatus" class="label-note" style="margin-bottom:8px;"></div>
+        <input id="editOrgIconFile" type="file" accept="image/png,image/jpeg">
+        <div class="form-actions" style="margin-top:10px;">
+          <button type="button" class="btn-primary" id="editOrgIconUploadBtn" onclick="uploadOrgIcon()">Upload icon</button>
+          <button type="button" class="btn-ghost" id="editOrgIconRemoveBtn" onclick="removeOrgIcon()">Remove custom icon</button>
+        </div>
+      </div>
+    </div>
+    <label for="editOrgInstallLink" style="margin-top:14px;">Install link for this organization</label>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input id="editOrgInstallLink" readonly>
+      <button type="button" class="btn-ghost" onclick="copyOrgInstallLink()">Copy</button>
+    </div>
+    <div class="label-note" style="margin-top:6px;">Open this link on a phone or PC and choose Install to get this organization's app with its own icon.</div>
 
-/* ============ ATTENTION GRID ============ */
-.attention-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;}
-.attention-card{border:1px solid var(--red);background:var(--red-pale);border-radius:6px;padding:14px;cursor:pointer;}
-.attention-card:hover{filter:brightness(0.98);}
-.attention-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;}
-.attention-name{font-family:'Oswald',sans-serif;font-weight:600;font-size:15px;color:var(--navy);}
-.attention-meta{font-size:12px;color:var(--grey);margin-top:2px;}
-.attention-pm{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--red);margin-top:6px;}
+    <h2 style="margin-top:26px;font-size:15px;">Boards access</h2>
+    <div class="label-note" style="margin-bottom:8px;">Boards are hidden for everyone. Tick a person to give them the Boards section.</div>
+    <div id="boardsAccessList"></div>
 
-/* ============ SEARCH BAR ============ */
-.search-bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px;align-items:center;}
-/* Override the global input/select width:100% specifically inside filter
-   bars - that global rule is correct for stacked form fields, but was
-   never meant to apply here too, which is why a single dropdown like
-   "All Departments" was stretching to the full row width on any screen
-   size, not just mobile. Each filter now sizes to its content instead. */
-.search-bar > select, .search-bar > input:not([type="text"]){
-  width:auto;flex:0 1 auto;min-width:130px;max-width:220px;
-}
-.search-bar > input[type="text"]{
-  width:auto;flex:1 1 200px;min-width:160px;
-}
-.search-bar > button{
-  flex:0 0 auto;
-}
-.search-bar input, .search-bar select{background:var(--white);border:1px solid var(--grey-light);color:var(--text);padding:10px 12px;border-radius:5px;font-family:'IBM Plex Sans',sans-serif;font-size:13.5px;}
-.search-bar input[type="text"]{flex:1;min-width:200px;}
+    <h2 style="margin-top:26px;font-size:15px;">Performance access</h2>
+    <div class="label-note" style="margin-bottom:8px;">Employee Performance is hidden for everyone. Tick a person to give them the Performance section.</div>
+    <div id="performanceAccessList"></div>
 
-/* ============ MACHINE CARDS ============ */
-.machine-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px;}
-.machine-card{background:var(--white);border:1px solid var(--grey-light);border-radius:8px;overflow:hidden;cursor:pointer;transition:transform .15s, box-shadow .15s;}
+    <h2 style="margin-top:26px;font-size:15px;">Reset a User's Password</h2>
+    <label for="resetPasswordUser">User</label>
+    <select id="resetPasswordUser"></select>
+    <label for="resetPasswordNew">New Password</label>
+    <input id="resetPasswordNew" type="password" autocomplete="new-password">
+    <div class="form-error" id="resetPasswordError" style="display:none;"></div>
+    <div class="form-actions">
+      <button type="button" class="btn-primary" onclick="submitPasswordReset()">Reset Password</button>
+    </div>
+  </div>
+</div>
+</div>
 
-/* ============ CATEGORY DROPDOWN + VIEW TOGGLE (Machines page) ============ */
-.machines-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px;}
+<div class="app-shell" id="appShell" style="display:none;">
+<div class="topbar-accent"></div>
+<div class="app">
 
-.view-toggle{display:flex;border:1px solid var(--grey-light);border-radius:6px;overflow:hidden;flex-shrink:0;}
-.view-toggle button{background:var(--white);border:0;padding:7px 12px;cursor:pointer;font-size:13px;color:var(--grey);font-family:'IBM Plex Sans',sans-serif;display:flex;align-items:center;gap:5px;}
-.view-toggle button.active{background:var(--navy);color:var(--white);}
-.view-toggle button:first-child{border-right:1px solid var(--grey-light);}
+  <header>
+    <div class="plant-id">
+      <button class="hamburger" id="hamburgerBtn" aria-label="Menu">&#9776;</button>
+      <img id="headerLogo" class="header-logo" style="display:none;" alt="Organization logo">
+      <span class="brand-icon" id="brandIcon">&#9881;&#65039;</span>
+      <div>
+        <h1 id="headerTitle">STEEL<span>WORKS</span> <small>CMMS</small></h1>
+        <div class="subtitle" id="headerSubtitle">MAINTENANCE LOG &amp; WORK ORDER SYSTEM</div>
+        <span class="cmms-badge" id="cmmsBadge" style="display:none;">CMMS</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <nav class="topnav" id="topnav">
+        <button type="button" class="mobile-user-info" id="mobileUserInfo" onclick="openSettings()"></button>
+        <button data-view="dashboard" class="active" id="dashboardNavBtn">Dashboard</button>
+        <button data-view="machines" id="machinesNavBtn">Machines</button>
+        <button data-view="logs" id="logsNavBtn">Maintenance Logs</button>
+        <button data-view="reports" id="reportsNavBtn">Reports</button>
+        <button data-view="pm" id="pmNavBtn">PM Schedule</button>
+        <button data-view="performance" id="performanceNavBtn">Performance</button>
+        <button data-view="kanban" id="kanbanNavBtn">Boards</button>
+        <button data-view="admin" id="adminNavBtn">Admin</button>
+      </nav>
+      <div class="auth-buttons">
+        <button type="button" class="bell-btn" id="bellBtn" title="Notifications" aria-label="Notifications" onclick="toggleNotifPanel(event)">&#128276;<span class="bell-badge" id="bellBadge" style="display:none;">0</span></button>
+        <button type="button" class="user-chip user-chip-btn" id="userChip" title="Settings" onclick="openSettings()"></button>
+        <button class="btn-outline" onclick="logout()">Log Out</button>
+      </div>
+    </div>
+  </header>
 
-.machines-table-wrap{overflow-x:auto;overflow-y:auto;max-height:65vh;border:1px solid var(--grey-light);border-radius:8px;background:var(--white);-webkit-overflow-scrolling:touch;}
-table.machines-table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:800px;}
-table.machines-table th,table.machines-table td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--grey-light);white-space:nowrap;}
-table.machines-table th{font-weight:600;background:var(--grey-lighter);color:var(--navy);position:sticky;top:0;z-index:1;}
-table.machines-table td.name-cell{white-space:normal;max-width:180px;line-height:1.3;}
-table.machines-table td.crop-cell{max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help;}
-table.machines-table tbody tr{cursor:pointer;}
-table.machines-table tbody tr:hover{background:var(--navy-pale);}
-table.machines-table tbody tr:last-child td{border-bottom:0;}
-table.machines-table td.overdue{color:var(--red);font-weight:600;}
-table.machines-table .thumb{width:34px;height:34px;border-radius:5px;object-fit:cover;background:var(--grey-lighter);display:block;}
-table.machines-table .thumb-placeholder{width:34px;height:34px;border-radius:5px;background:var(--grey-lighter);display:flex;align-items:center;justify-content:center;color:var(--grey-light);font-size:16px;}
-table.machines-table .row-actions{display:flex;gap:6px;}
-@media (max-width:640px){
-  .machines-toolbar{flex-direction:column;align-items:stretch;}
-  .view-toggle{align-self:flex-end;}
-}
+  <!-- ============ DASHBOARD ============ -->
+  <section class="view active" id="view-dashboard">
+    <div class="page-head">
+      <h2 class="page-title">Dashboard Overview</h2>
+      <div class="page-head-actions">
+        <button class="btn-alert" onclick="openDowntimeForm()" id="dashboardReportDownBtn">&#9888; Report Breakdown</button>
+        <button class="btn-primary" onclick="openLogForm()" id="dashboardNewLogBtn">Submit New Log</button>
+      </div>
+    </div>
 
-/* ============ LOGS TABLE VIEW ============ */
-.logs-toolbar{display:flex;align-items:center;justify-content:flex-end;margin-bottom:10px;}
-.logs-table-wrap{overflow-x:auto;border:1px solid var(--grey-light);border-radius:8px;background:var(--white);-webkit-overflow-scrolling:touch;}
-table.logs-table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:1400px;}
-table.logs-table th,table.logs-table td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--grey-light);vertical-align:top;}
-table.logs-table th{font-weight:600;background:var(--grey-lighter);color:var(--navy);white-space:nowrap;position:sticky;top:0;}
-table.logs-table tbody tr:hover{background:var(--navy-pale);}
-table.logs-table tbody tr:last-child td{border-bottom:0;}
-table.logs-table td.crop-cell{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help;}
-table.logs-table td.wrap-cell-wide{min-width:220px;max-width:340px;white-space:normal;line-height:1.4;}
-table.logs-table td.nowrap{white-space:nowrap;}
-.icon-btn{background:var(--grey-lighter);border:1px solid var(--grey-light);border-radius:5px;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;font-size:13px;padding:0;color:var(--navy);}
-.icon-btn:hover{background:var(--navy-pale);border-color:var(--navy-light);}
-.icon-btn-row{display:flex;gap:5px;}
+    <div class="stat-grid">
+      <div class="stat-card-mini warn" id="pmDueCard" onclick="switchView('pm')" style="cursor:pointer;">
+        <div class="stat-icon">&#128295;</div>
+        <div class="stat-value" id="pmDueSoonValue">&mdash;</div>
+        <div class="stat-label">PM Due Soon</div>
+        <div class="stat-sub" id="pmDueSoonSub">Next 7 days</div>
+      </div>
+      <div class="stat-card-mini alert" id="machinesDownCard" onclick="toggleMachinesDownList()" style="cursor:pointer;">
+        <div class="stat-icon">&#9888;&#65039;</div>
+        <div class="stat-value" id="machinesDownValue">&mdash;</div>
+        <div class="stat-label">Machines Down</div>
+        <div class="stat-sub">Right now &middot; tap to view</div>
+      </div>
+      <div class="stat-card-mini">
+        <div class="stat-icon">&#127981;</div>
+        <div class="stat-value" id="totalMachinesValue">&mdash;</div>
+        <div class="stat-label">Total Machines</div>
+        <div class="stat-sub">Registered</div>
+      </div>
+      <div class="stat-card-mini">
+        <div class="stat-icon">&#128221;</div>
+        <div class="stat-value" id="logsThisMonthValue">&mdash;</div>
+        <div class="stat-label">Logs This Month</div>
+        <div class="stat-sub">All types</div>
+      </div>
+      <div class="stat-card-mini warn">
+        <div class="stat-icon">&#9203;</div>
+        <div class="stat-value" id="pendingLogsValue">&mdash;</div>
+        <div class="stat-label">Pending Logs</div>
+        <div class="stat-sub">Need follow-up</div>
+      </div>
+      <div class="stat-card-mini warn">
+        <div class="stat-icon">&#128269;</div>
+        <div class="stat-value" id="awaitingReviewValue">&mdash;</div>
+        <div class="stat-label">Awaiting Review</div>
+        <div class="stat-sub">Completed, unreviewed</div>
+      </div>
+    </div>
 
-/* ============ AUTOMATIC FINDINGS ============ */
-.finding-card{border-left:4px solid var(--grey-light);background:var(--white);border:1px solid var(--grey-light);border-left-width:4px;border-radius:0 6px 6px 0;padding:12px 14px;margin-bottom:10px;}
-#findingsList,#machineFindingsList{max-height:340px;overflow-y:auto;padding-right:4px;}
-.finding-card.High{border-left-color:var(--red);}
-.finding-card.Medium{border-left-color:var(--amber);}
-.finding-card.Info{border-left-color:var(--navy-light);}
-.finding-card-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-.finding-severity{font-size:10.5px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;padding:2px 7px;border-radius:9px;color:#fff;}
-.finding-severity.High{background:var(--red);}
-.finding-severity.Medium{background:var(--amber);}
-.finding-severity.Info{background:var(--navy-light);}
-.finding-title{font-weight:600;color:var(--navy);font-size:14px;}
-.finding-detail{margin-top:4px;font-size:13px;color:var(--text);}
-.finding-action{margin-top:5px;font-size:12.5px;color:var(--grey);font-style:italic;}
-.finding-card{cursor:default;}
-.finding-card.clickable{cursor:pointer;}
-.finding-card.clickable:hover{background:var(--navy-pale);}
-.machine-card:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(11,37,69,0.1);}
-.machine-cover{height:140px;background-size:cover;background-position:center;background-color:var(--navy-pale);display:flex;align-items:center;justify-content:center;position:relative;}
-.machine-cover.no-photo::before{content:'\1F527';font-size:34px;opacity:0.3;}
-.machine-status-pill{position:absolute;top:10px;right:10px;font-family:'Oswald',sans-serif;font-size:10px;font-weight:700;letter-spacing:0.6px;text-transform:uppercase;padding:4px 10px;border-radius:12px;}
-.machine-card-body{padding:14px 16px 16px;}
-.machine-name{font-family:'Oswald',sans-serif;font-size:16px;font-weight:600;text-transform:uppercase;margin-bottom:2px;color:var(--navy);}
-.machine-code{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--grey);margin-bottom:10px;}
-.machine-info-row{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--grey);margin-bottom:4px;}
-.machine-info-row.overdue{color:var(--red);}
-.machine-card-actions{display:flex;gap:8px;margin-top:12px;}
-.machine-card-actions button{flex:1;font-size:12px;padding:8px;}
+    <div class="panel-block" id="machinesDownPanel">
+      <div class="panel-block-head">
+        <h3>Machines Currently Down</h3>
+      </div>
+      <div id="machinesDownList" style="max-height:340px;overflow-y:auto;padding-right:4px;-webkit-overflow-scrolling:touch;"></div>
+    </div>
 
-/* ============ FORM PANELS ============ */
-.panel{background:var(--white);border:1px solid var(--grey-light);border-radius:8px;padding:26px 28px;max-width:640px;}
-.panel h2{font-family:'Oswald',sans-serif;text-transform:uppercase;font-size:19px;letter-spacing:0.5px;margin:0 0 4px;color:var(--navy);}
-.panel .hint{color:var(--grey);font-size:13px;margin-bottom:22px;}
-label{display:block;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.5px;text-transform:uppercase;color:var(--grey);margin:16px 0 6px;}
-label:first-of-type{margin-top:0;}
-.label-note{text-transform:none;font-family:'IBM Plex Sans',sans-serif;color:var(--grey);letter-spacing:0;}
-input, select, textarea{width:100%;background:var(--white);border:1px solid var(--grey-light);color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:14.5px;padding:11px 12px;border-radius:5px;}
-input:focus, select:focus, textarea:focus{outline:2px solid var(--navy-light);outline-offset:1px;border-color:var(--navy-light);}
-textarea{resize:vertical;min-height:80px;font-family:'IBM Plex Sans',sans-serif;}
-.row2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
-.log-type-select{font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:0.5px;}
-.form-actions{margin-top:26px;display:flex;gap:10px;}
-.form-error{background:var(--red-pale);border:1px solid var(--red);color:var(--red);padding:10px 14px;border-radius:5px;font-size:13px;margin-top:16px;}
+    <div class="chart-grid">
+      <div class="chart-panel">
+        <h3>Weekly Maintenance Trends</h3>
+        <div class="chart-box"><canvas id="weeklyTrendsChart"></canvas></div>
+      </div>
+      <div class="chart-panel">
+        <h3>PM Compliance</h3>
+        <div class="chart-box"><canvas id="pmComplianceChart"></canvas></div>
+      </div>
+    </div>
 
-/* ============ DETAIL VIEWS ============ */
-.detail-back{background:none;border:none;color:var(--grey);font-family:'IBM Plex Mono',monospace;font-size:12.5px;cursor:pointer;padding:0;margin:20px 0 16px;}
-.detail-back:hover{color:var(--navy);}
-.detail-head{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px;margin-bottom:22px;}
-.detail-head h2{font-family:'Oswald',sans-serif;text-transform:uppercase;font-size:24px;margin:0 0 4px;color:var(--navy);}
-.machine-detail-cover{width:100%;height:220px;border-radius:8px;background-size:cover;background-position:center;background-color:var(--navy-pale);margin-bottom:20px;display:flex;align-items:center;justify-content:center;}
-.machine-detail-cover.no-photo::before{content:'\1F527';font-size:52px;opacity:0.25;}
-.machine-info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:22px;}
-.info-tile{background:var(--white);border:1px solid var(--grey-light);border-radius:6px;padding:14px 16px;}
-.info-tile-label{font-family:'IBM Plex Mono',monospace;font-size:10px;text-transform:uppercase;color:var(--grey);margin-bottom:6px;letter-spacing:0.5px;}
-.info-tile-value{font-family:'Oswald',sans-serif;font-size:15px;font-weight:600;color:var(--navy);}
+    <div class="panel-block" id="findingsPanel" style="display:none;">
+      <div class="panel-block-head">
+        <h3>Automatic Findings</h3>
+      </div>
+      <div id="findingsList"></div>
+    </div>
 
-/* ============ LOG ENTRY CARDS ============ */
-.log-entry{background:var(--white);border:1px solid var(--grey-light);border-left:4px solid var(--grey);border-radius:0 6px 6px 0;padding:13px 16px;margin-bottom:11px;}
-.log-entry.preventive{border-left-color:var(--navy);}
-.log-entry.breakdown{border-left-color:var(--red);}
-.log-entry-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;}
-.log-entry-top-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
-.log-type-badge{font-family:'Oswald',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;padding:3px 10px;border-radius:3px;}
-.log-type-badge.preventive{background:var(--navy-pale);color:var(--navy);}
-.log-type-badge.breakdown{background:var(--red-pale);color:var(--red);}
-.log-machine-tag{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text);background:var(--grey-lighter);padding:3px 9px;border-radius:3px;}
-.log-tech{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--grey);}
-.log-field{font-size:13.5px;margin-top:4px;line-height:1.4;}
-.log-downtime-tag{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--grey);background:var(--grey-lighter);padding:3px 8px;border-radius:3px;}
-.log-field b{color:var(--grey);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.4px;display:inline-block;margin-right:6px;}
-.log-entry-actions{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
-.log-pdf-btn{font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid var(--grey-light);color:var(--navy);padding:5px 10px;border-radius:4px;cursor:pointer;}
-.log-pdf-btn:hover{border-color:var(--navy);}
-.log-review-btn{font-family:'Oswald',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;background:var(--navy);color:var(--white);border:none;padding:6px 12px;border-radius:4px;cursor:pointer;}
-.log-review-btn:hover{background:var(--navy-light);}
-.log-reviewed-note{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--grey);}
-.log-attach-btn{font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px dashed var(--grey-light);color:var(--grey);padding:5px 10px;border-radius:4px;cursor:pointer;}
-.log-delete-btn{font-family:'IBM Plex Mono',monospace;font-size:11px;background:none;border:1px solid #F1C4C0;color:var(--red);padding:5px 10px;border-radius:4px;cursor:pointer;}
-.log-delete-btn:hover{background:#FDF1F0;}
-.log-attach-btn:hover{border-color:var(--navy);color:var(--navy);}
-.attachment-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
-.attachment-chip{display:inline-flex;align-items:center;gap:6px;background:var(--grey-lighter);border:1px solid var(--grey-light);border-radius:5px;padding:5px 6px 5px 10px;font-size:11.5px;color:var(--text);}
-.attachment-viewer-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px;}
-.attachment-viewer-box{background:var(--white);border-radius:8px;max-width:900px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;}
-.attachment-viewer-box.pdf-size{max-width:95vw;width:1200px;height:94vh;max-height:94vh;}
-.attachment-viewer-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--grey-light);font-weight:600;color:var(--navy);gap:12px;}
-.attachment-viewer-body{padding:16px;overflow:auto;}
-.attachment-viewer-body.pdf-body{padding:0;flex:1;min-height:0;}
+    <div class="panel-block">
+      <div class="panel-block-head">
+        <h3>Recent Maintenance Logs</h3>
+        <a href="#" onclick="switchView('logs');return false;">View All</a>
+      </div>
+      <div id="recentLogsList"></div>
+    </div>
 
-.password-confirm-box{background:var(--white);border-radius:8px;max-width:360px;width:100%;padding:22px;}
-.password-confirm-title{font-family:'Oswald',sans-serif;font-size:17px;color:var(--navy);margin-bottom:8px;}
-.password-confirm-body{font-size:13.5px;color:var(--text);line-height:1.5;margin-bottom:14px;}
-.password-confirm-box input[type="password"]{width:100%;padding:10px 12px;border:1px solid var(--grey-light);border-radius:5px;font-size:14px;margin-bottom:6px;}
-.password-confirm-error{color:var(--red);font-size:12.5px;margin-bottom:8px;}
-.password-confirm-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px;}
+    <div class="panel-block">
+      <div class="panel-block-head">
+        <h3>Machines Requiring Attention</h3>
+        <a href="#" onclick="switchView('machines');return false;">View All Machines</a>
+      </div>
+      <div class="attention-grid" id="attentionGrid"></div>
+    </div>
 
-.idle-warning-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:2000;padding:20px;}
-.idle-warning-box{background:var(--white);border-radius:8px;max-width:380px;width:100%;padding:24px;text-align:center;}
-.idle-warning-title{font-family:'Oswald',sans-serif;font-size:19px;color:var(--navy);margin-bottom:10px;}
-.idle-warning-body{font-size:14px;color:var(--text);line-height:1.5;margin-bottom:18px;}
-.idle-warning-body #idleCountdownNum{font-weight:700;color:var(--red);}
-.attachment-chip:hover{border-color:var(--navy);}
-.attachment-chip a{color:var(--text);text-decoration:none;}
-.attachment-chip a:hover{color:var(--navy);text-decoration:underline;}
-.attachment-chip .del{background:none;border:none;color:var(--red);cursor:pointer;font-weight:700;font-size:14px;line-height:1;padding:0 2px;}
-.attachment-chip .del:hover{color:#8a1d17;}
+    <div class="panel-block" id="performanceMatrixBlock" style="display:none;">
+      <div class="panel-block-head">
+        <h3>Machine Performance</h3>
+        <a href="#" onclick="openScheduleSettings();return false;">Manage Operating Schedule</a>
+      </div>
+      <div class="search-bar">
+        <select id="matrixMode">
+          <option value="daily">Daily</option>
+          <option value="monthly" selected>Monthly</option>
+          <option value="yearly">Yearly</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        <input type="date" id="matrixDate" style="display:none;">
+        <input type="month" id="matrixMonth">
+        <input type="number" id="matrixYear" placeholder="2026" style="display:none;max-width:110px;">
+        <input type="date" id="matrixFrom" style="display:none;">
+        <span id="matrixToLabel" style="display:none;color:var(--grey);font-size:12.5px;">to</span>
+        <input type="date" id="matrixTo" style="display:none;">
+        <select id="matrixDepartment"><option value="">All Categories</option></select>
+        <button class="btn-ghost" onclick="loadMatrix()">Apply</button>
+        <button class="btn-primary" onclick="downloadMatrixExcel()">&#11015; Download Excel</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="matrix-table" id="matrixTable">
+          <thead>
+            <tr>
+              <th>Machine</th>
+              <th>Cumulative Downtime (hrs)</th>
+              <th># Failures</th>
+              <th>MTTR (hrs)</th>
+              <th>MTBF (hrs)</th>
+              <th>Operating Time (hrs)</th>
+            </tr>
+          </thead>
+          <tbody id="matrixTableBody"></tbody>
+        </table>
+      </div>
+      <div class="empty-state" id="matrixEmpty" style="display:none;">
+        <div class="big">No machines registered yet</div>
+      </div>
+    </div>
+  </section>
 
-/* ============ EMPTY STATE ============ */
-.empty-state{text-align:center;padding:60px 20px;color:var(--grey);border:1px dashed var(--grey-light);border-radius:8px;background:var(--white);}
-.empty-state .big{font-family:'Oswald',sans-serif;font-size:19px;text-transform:uppercase;color:var(--navy);margin-bottom:6px;}
+  <!-- ============ OPERATING SCHEDULE SETTINGS ============ -->
+  <section class="view" id="view-schedule-settings">
+    <button class="detail-back" onclick="switchView('dashboard')">&larr; Back to Dashboard</button>
+    <div class="panel" style="max-width:560px;">
+      <h2>Operating Schedule</h2>
+      <div class="hint">Used to calculate MTBF. Default applies to every day; add an override only for days that differ (Sundays, night shifts, holidays).</div>
+      <label for="defaultHoursInput">Default Operating Hours Per Day</label>
+      <input type="number" id="defaultHoursInput" min="0" max="24" step="0.5">
+      <div class="form-actions">
+        <button class="btn-primary" onclick="saveDefaultHours()">Save Default</button>
+      </div>
+    </div>
+    <div class="panel" style="max-width:560px;margin-top:20px;">
+      <h2>Date Overrides</h2>
+      <div class="row2">
+        <div>
+          <label for="overrideDate">Date</label>
+          <input type="date" id="overrideDate">
+        </div>
+        <div>
+          <label for="overrideHours">Hours That Day</label>
+          <input type="number" id="overrideHours" min="0" max="24" step="0.5">
+        </div>
+      </div>
+      <label for="overrideNote">Note <span class="label-note">(optional, e.g. "Night shift" or "Sunday - closed")</span></label>
+      <input id="overrideNote" placeholder="e.g. Night shift">
+      <div class="form-actions">
+        <button class="btn-primary" onclick="addOverride()">Add / Update Override</button>
+      </div>
+    </div>
+    <div class="panel-block" style="margin-top:20px;">
+      <h3>Recent Overrides</h3>
+      <div id="overridesList"></div>
+    </div>
+  </section>
 
-/* ============ SUBTABS ============ */
-.subtabs{display:flex;gap:2px;margin-bottom:20px;background:var(--white);border:1px solid var(--grey-light);padding:4px;border-radius:6px;max-width:360px;}
-.subtabs button{flex:1;background:transparent;border:none;color:var(--grey);font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:0.5px;text-transform:uppercase;padding:10px;cursor:pointer;border-radius:4px;}
-.subtabs button.active{background:var(--navy);color:var(--white);font-weight:600;}
-.report-view{display:none;}
-.report-view.active{display:block;}
+  <!-- ============ MACHINES ============ -->
+  <section class="view" id="view-machines">
+    <div class="page-head">
+      <h2 class="page-title">Machine Management</h2>
+      <div class="page-head-actions">
+        <button class="btn-ghost" id="downloadMachinesBtn" onclick="downloadMachines()">&#11015; Download machines</button>
+        <button class="btn-primary" id="addMachineBtn" onclick="openMachineForm()">+ Add New Machine</button>
+      </div>
+    </div>
 
-.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:20px;}
-.mini-stat{background:var(--white);border:1px solid var(--grey-light);border-radius:6px;padding:16px;text-align:center;}
-.mini-delta{font-size:11.5px;margin-top:4px;line-height:1.5;}
-.mini-delta .d-row{white-space:nowrap;}
-.mini-delta .up{color:var(--red);font-weight:600;}
-.mini-delta .down{color:#1E7A3D;font-weight:600;}
-.mini-delta .same{color:var(--grey);font-weight:600;}
-.mini-value{font-family:'Oswald',sans-serif;font-size:26px;font-weight:700;color:var(--navy);}
-.mini-label{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--grey);margin-top:4px;text-transform:uppercase;letter-spacing:0.4px;}
+    <div class="filters-toggle-row">
+      <button class="btn-ghost filters-toggle-btn" onclick="document.getElementById('machinesFilterBar').classList.toggle('open')">&#9881; Filters</button>
+    </div>
+    <div class="search-bar" id="machinesFilterBar">
+      <input type="text" id="machineSearch" placeholder="Search by machine name or code">
+      <select id="categoryFilter" onchange="setMachineCategory(this.value)"></select>
+      <select id="machineStatusFilter"><option value="">All Statuses</option><option>Running</option><option>Down</option><option>Standby</option></select>
+      <button class="btn-ghost" onclick="clearMachineFilters()">Clear</button>
+      <span class="filter-count" id="machineCount"></span>
+    </div>
 
-/* ============ MACHINE PERFORMANCE MATRIX ============ */
-.matrix-table{width:100%;border-collapse:collapse;font-size:13px;min-width:640px;}
-.matrix-table thead th{text-align:left;font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.4px;color:var(--grey);border-bottom:2px solid var(--grey-light);padding:8px 10px;}
-.matrix-table tbody td{padding:10px 10px;border-bottom:1px solid var(--grey-lighter);}
-.matrix-table tbody tr{cursor:pointer;}
-.matrix-table tbody tr:hover{background:var(--navy-pale);}
-.matrix-code{color:var(--grey);font-family:'IBM Plex Mono',monospace;font-size:11px;}
+    <div class="machines-toolbar">
+      <div class="view-toggle" id="machineViewToggle">
+        <button id="viewToggleCard" onclick="setMachineView('card')">&#9638; Cards</button>
+        <button id="viewToggleTable" onclick="setMachineView('table')">&#9776; Table</button>
+      </div>
+    </div>
 
-/* ============ ORGANIZATION BRANDING ============ */
-.logo-preview-box{display:flex;align-items:center;justify-content:center;width:140px;height:140px;border:1px dashed var(--grey-light);border-radius:8px;background:var(--grey-lighter);overflow:hidden;}
-.logo-preview-box img{max-width:100%;max-height:100%;object-fit:contain;}
-.logo-preview-box span{color:var(--grey);font-size:12px;text-align:center;padding:0 10px;}
+    <div class="machine-grid" id="machineGrid"></div>
+    <div class="machines-table-wrap" id="machineTableWrap" style="display:none;">
+      <table class="machines-table">
+        <thead><tr>
+          <th></th><th>Code</th><th>Name</th><th>Serial No.</th><th>Category</th><th>Location</th><th>Status</th><th>Next PM</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="machineTableBody"></tbody>
+      </table>
+    </div>
+    <div class="empty-state" id="machinesEmpty" style="display:none;">
+      <div class="big">No machines registered yet</div>
+      <div>Add your first machine to start tracking maintenance against it.</div>
+    </div>
+  </section>
 
-.radio-group{display:flex;flex-direction:column;gap:8px;margin-top:8px;}
-.radio-option{display:flex;align-items:center;gap:8px;font-family:'IBM Plex Sans',sans-serif;font-size:13.5px;text-transform:none;letter-spacing:0;color:var(--text);cursor:pointer;}
-.radio-option input{width:auto;flex-shrink:0;}
+  <!-- ============ MACHINE FORM (add/edit) ============ -->
+  <section class="view" id="view-machine-form">
+    <button class="detail-back" onclick="switchView('machines')">&larr; Back to Machines</button>
+    <div class="panel">
+      <h2 id="machineFormTitle">Add New Machine</h2>
+      <div class="hint">Register equipment so it can be selected from a dropdown on maintenance logs.</div>
+      <form id="machineForm">
+        <input type="hidden" id="machineFormId">
+        <div class="row2">
+          <div>
+            <label for="mName">Machine Name</label>
+            <input id="mName" required placeholder="e.g. Welder Elite">
+          </div>
+          <div>
+            <label for="mCode">Machine Code</label>
+            <input id="mCode" required placeholder="e.g. MC-1003">
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label for="mModel">Model <span class="label-note">(optional)</span></label>
+            <input id="mModel" placeholder="e.g. GA9070">
+          </div>
+          <div>
+            <label for="mSerial">Serial Number <span class="label-note">(optional)</span></label>
+            <input id="mSerial" placeholder="e.g. 10045K">
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label for="mPower">Power Rating <span class="label-note">(optional)</span></label>
+            <input id="mPower" placeholder="e.g. 2.2 kW">
+          </div>
+          <div></div>
+        </div>
+        <div class="row2">
+          <div>
+            <label for="mDept">Category</label>
+            <input id="mDept" placeholder="e.g. Forging">
+          </div>
+          <div>
+            <label for="mLoc">Location</label>
+            <input id="mLoc" placeholder="e.g. Floor 3, Bay 2">
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label for="mStatus">Status</label>
+            <select id="mStatus"><option>Running</option><option>Down</option><option>Standby</option></select>
+          </div>
+          <div>
+            <label for="mNextPm">Next PM Date</label>
+            <input id="mNextPm" type="date">
+          </div>
+        </div>
+        <label for="mPhotoFile">Upload Photo <span class="label-note">(preferred \u2014 stored directly, compressed automatically)</span></label>
+        <input id="mPhotoFile" type="file" accept="image/png,image/jpeg,image/webp">
+        <div id="mPhotoUploadProgress" style="display:none;margin-top:6px;">
+          <div style="background:var(--grey-lighter);border-radius:4px;height:6px;overflow:hidden;">
+            <div id="mPhotoUploadBar" style="background:var(--navy);height:100%;width:0%;transition:width .15s;"></div>
+          </div>
+          <div id="mPhotoUploadLabel" style="font-size:11px;color:var(--grey);margin-top:3px;">Uploading&hellip; 0%</div>
+        </div>
+        <div id="mPhotoPreviewWrap" style="display:none;margin-top:8px;">
+          <img id="mPhotoPreview" style="max-width:180px;max-height:120px;border-radius:6px;border:1px solid var(--grey-light);display:block;">
+          <button type="button" class="btn-ghost" style="margin-top:6px;padding:6px 12px;font-size:12px;" onclick="removeMachinePhoto()">Remove uploaded photo</button>
+        </div>
+        <label for="mPhoto" style="margin-top:14px;">Or paste a Photo URL <span class="label-note">(fallback \u2014 only used if no photo is uploaded above)</span></label>
+        <input id="mPhoto" type="url" placeholder="https://example.com/machine-photo.jpg">
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" id="machineFormSubmit">Add Machine</button>
+          <button type="button" class="btn-ghost" onclick="switchView('machines')">Cancel</button>
+          <button type="button" class="log-delete-btn" id="machineFormDeleteBtn" style="display:none;margin-left:auto;" onclick="deleteMachine(document.getElementById('machineFormId').value, document.getElementById('mName').value)">&#128465; Delete Machine</button>
+        </div>
+      </form>
+    </div>
+  </section>
 
-.header-preview-box{border:1px solid var(--grey-light);border-radius:8px;padding:16px;background:var(--grey-lighter);margin-top:6px;}
-.header-preview-inner{display:flex;align-items:center;gap:10px;}
-.header-preview-logo{height:36px;max-width:180px;object-fit:contain;}
-.header-preview-title{font-family:'Oswald',sans-serif;font-weight:700;font-size:16px;text-transform:uppercase;color:var(--navy);letter-spacing:0.4px;}
-.header-preview-subtitle{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--grey);letter-spacing:0.4px;margin-top:2px;}
+  <!-- ============ MACHINE DETAIL ============ -->
+  <section class="view" id="view-machine-detail">
+    <button class="detail-back" onclick="switchView('machines')">&larr; Back to Machines</button>
+    <div id="machineDetailContent"></div>
+  </section>
 
-/* ============ ADMIN / USERS ============ */
-.user-row{display:flex;justify-content:space-between;align-items:center;background:var(--white);border:1px solid var(--grey-light);border-radius:6px;padding:14px 18px;margin-bottom:10px;flex-wrap:wrap;gap:10px;}
-.user-row-left{display:flex;flex-direction:column;gap:2px;}
-.org-row-main{display:flex;align-items:center;gap:12px;}
-.org-icon-thumb{width:40px;height:40px;border-radius:9px;object-fit:cover;flex-shrink:0;background:var(--grey-lighter);}
-.org-icon-preview{width:96px;height:96px;border-radius:20px;object-fit:cover;border:1px solid var(--grey-light);background:var(--grey-lighter);flex-shrink:0;}
-.user-name{font-weight:600;font-size:14px;}
-.user-meta{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--grey);}
-.role-pill{font-family:'Oswald',sans-serif;font-size:10.5px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;padding:4px 12px;border-radius:12px;background:var(--navy-pale);color:var(--navy);}
-.role-pill.mgmt{background:var(--red-pale);color:var(--red);}
-.user-row-actions{display:flex;gap:8px;}
+  <!-- ============ LOG DETAIL (reached by clicking a part used, e.g. from Reports) ============ -->
+  <section class="view" id="view-log-detail">
+    <button class="detail-back" onclick="switchView(window._logDetailBackView||'reports')">&larr; Back</button>
+    <div id="logDetailContent"></div>
+  </section>
 
-.toast{position:fixed;bottom:24px;right:24px;background:var(--navy);border-left:4px solid var(--red);color:var(--white);padding:14px 18px;border-radius:6px;font-size:13.5px;max-width:320px;box-shadow:0 8px 24px rgba(0,0,0,0.3);z-index:200;}
+  <!-- ============ KANBAN BOARDS ============ -->
+  <section class="view" id="view-kanban">
+    <div class="page-head">
+      <h2 class="page-title">Boards</h2>
+      <button class="btn-primary" onclick="kbNewBoard()">+ New Board</button>
+    </div>
+    <div class="hint" style="margin-bottom:14px;">Track projects and maintenance jobs with your team. You only see boards you are a member of.</div>
+    <div class="kb-board-grid" id="kbBoardGrid"></div>
+  <footer class="app-footer"><a href="https://www.taskorb.net" target="_blank" rel="noopener" title="TaskOrb - taskorb.net"><span>Powered by</span><img src="https://www.taskorb.net/img/logo.png" alt="TaskOrb" onerror="this.style.display='none';this.nextElementSibling.style.display=''"><span class="tb-name" style="display:none">TaskOrb</span></a></footer>
+  </section>
+  <section class="view" id="view-kanban-board">
+    <div id="kbBoardArea"></div>
+  <footer class="app-footer"><a href="https://www.taskorb.net" target="_blank" rel="noopener" title="TaskOrb - taskorb.net"><span>Powered by</span><img src="https://www.taskorb.net/img/logo.png" alt="TaskOrb" onerror="this.style.display='none';this.nextElementSibling.style.display=''"><span class="tb-name" style="display:none">TaskOrb</span></a></footer>
+  </section>
 
-/* ============ RESPONSIVE ============ */
-@media (max-width:900px){
-  .chart-grid{grid-template-columns:1fr;}
-}
-@media (max-width:768px){
-  .hamburger{display:inline-block;}
-  header{flex-wrap:nowrap;overflow:visible;}
-  .header-right{position:relative;width:auto;flex-direction:row;align-items:center;margin-left:auto;}
-  .topnav{
-    display:none;position:absolute;top:calc(100% + 10px);right:0;
-    flex-direction:column;width:230px;background:var(--white);
-    border:1px solid var(--grey-light);border-radius:8px;padding:8px;
-    box-shadow:0 12px 28px rgba(11,37,69,0.15);z-index:50;
-  }
-  .topnav.open{display:flex;}
-  .topnav button{text-align:left;width:100%;}
-  .subtitle{display:none;}
-  .user-chip{display:none;}
-  .topnav button.mobile-user-info{
-    display:block;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--navy);
-    background:var(--navy-pale);padding:9px 12px;border-radius:6px;margin-bottom:8px;
-  }
-  .topnav button.mobile-user-info::after{content:'  \2699\FE0E  Settings';opacity:.6;}
-}
-@media (max-width:480px){
-  .auth-buttons .btn-outline{padding:7px 10px;font-size:11.5px;}
-  .user-chip{max-width:26vw;}
-}
-@media (max-width:640px){
-  .row2{grid-template-columns:1fr;}
-  .panel{padding:20px;}
+  <!-- ============ MAINTENANCE LOGS ============ -->
+  <section class="view" id="view-logs">
+    <div class="page-head">
+      <h2 class="page-title">Maintenance Logs</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn-ghost" onclick="switchView('staff')" id="logsStaffBtn" style="display:none;">Staff List</button>
+        <button class="btn-primary" onclick="openLogForm()" id="logsNewLogBtn">+ New Log</button>
+      </div>
+    </div>
+    <div class="filters-toggle-row">
+      <button class="btn-ghost filters-toggle-btn" onclick="document.getElementById('logsFilterBar').classList.toggle('open')">&#9881; Filters</button>
+    </div>
+    <div class="search-bar" id="logsFilterBar">
+      <input type="text" id="logSearch" placeholder="Search machine, code, fault, technician" autocomplete="off">
+      <select id="logMachineFilter"><option value="">All Machines</option></select>
+      <select id="logTypeFilter"><option value="">All Types</option><option>Preventive</option><option>Breakdown</option></select>
+      <select id="logStatusFilter"><option value="">All Statuses</option><option>Pending</option><option>Completed</option><option>Reviewed</option></select>
+      <input type="date" id="logFilterFrom" title="From date">
+      <input type="date" id="logFilterTo" title="To date">
+            <button class="btn-ghost" onclick="clearLogFilters()">Clear</button>
+      <span class="filter-count" id="logCount"></span>
+      <button class="btn-ghost" onclick="exportLogsExcel()">&#11015; Excel</button>
+    </div>
 
-}
+    <div class="logs-toolbar">
+      <div class="view-toggle" id="logViewToggle">
+        <button id="logViewToggleCard" onclick="setLogView('card')">&#9638; Cards</button>
+        <button id="logViewToggleTable" onclick="setLogView('table')">&#9776; Table</button>
+      </div>
+    </div>
 
-/* ============ MACHINE PICKER (searchable, type-to-filter) ============ */
-.machine-picker{position:relative;}
-.machine-picker-results{
-  position:absolute;top:calc(100% + 2px);left:0;right:0;z-index:40;
-  background:var(--white);border:1px solid var(--grey-light);border-radius:6px;
-  box-shadow:0 12px 28px rgba(11,37,69,0.15);max-height:260px;overflow-y:auto;
-}
-.machine-picker-item{padding:10px 14px;font-size:14px;cursor:pointer;border-bottom:1px solid var(--grey-lighter);}
-.machine-picker-item:last-child{border-bottom:none;}
-.machine-picker-item:hover{background:var(--navy-pale);}
-.machine-picker-code{color:var(--grey);font-family:'IBM Plex Mono',monospace;font-size:12px;}
-.machine-picker-empty{padding:12px 14px;font-size:13px;color:var(--grey);}
+    <div id="logsPageList"></div>
+    <div class="logs-table-wrap" id="logsTableWrap" style="display:none;">
+      <table class="logs-table">
+        <thead><tr>
+          <th>Date</th><th>Machine</th><th>Start</th><th>End</th><th>Down (hr)</th><th>Findings</th><th>Actions Taken</th><th>Spares</th><th>Performed By</th><th>Status</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="logsTableBody"></tbody>
+      </table>
+    </div>
+    <div class="empty-state" id="logsEmpty" style="display:none;">
+      <div class="big">No logs yet</div>
+      <div>Once a technician submits a maintenance log it'll show up here.</div>
+    </div>
+  </section>
 
-/* ============ BACK TO TOP ============ */
-.back-to-top{
-  position:fixed;bottom:24px;right:24px;z-index:60;
-  width:46px;height:46px;border-radius:50%;border:none;
-  display:flex;align-items:center;justify-content:center;
-  background:var(--navy);color:var(--white);font-size:20px;line-height:1;
-  cursor:pointer;box-shadow:0 8px 20px rgba(11,37,69,0.35);
-  transition:background 0.15s, transform 0.15s;
-}
-.back-to-top:hover{background:var(--navy-2);transform:translateY(-2px);}
-@media (max-width:480px){
-  .back-to-top{bottom:16px;right:16px;width:42px;height:42px;font-size:18px;}
-}
+  <!-- ============ NEW LOG FORM ============ -->
+  <section class="view" id="view-log-form">
+    <button class="detail-back" onclick="switchView('logs')">&larr; Back to Logs</button>
+    <div class="panel">
+      <h2 id="logFormTitle">Maintenance Log Entry</h2>
+      <div class="hint" id="logFormHint">Filled in by the technician after attending to a machine.</div>
+      <form id="logForm">
+        <input type="hidden" id="logFormId">
+        <div class="pm-log-banner" id="pmLogBanner" style="display:none;"></div>
+        <label for="logMachineSearch">Machine Name</label>
+        <div class="machine-picker">
+          <input type="text" id="logMachineSearch" placeholder="Type a machine name or code..." autocomplete="off" required>
+          <input type="hidden" id="logMachine" required>
+          <div class="machine-picker-results" id="logMachineResults" style="display:none;"></div>
+        </div>
 
-/* ============ COLLAPSIBLE FILTER BARS (mobile) ============ */
-/* Scoped to #machinesFilterBar/#logsFilterBar specifically, NOT every
-   .search-bar - those two are the only ones with a "Filters" toggle
-   button to actually open them again. The Reports pages and Dashboard
-   matrix also use .search-bar for a couple of small fields + a Download
-   button, with no toggle button - applying this rule to them too made
-   those Download buttons disappear on mobile with no way to reveal them.
-   Those smaller bars use the compact sizing fix below instead, without
-   ever being hidden. */
-.filters-toggle-row{display:none;margin-bottom:10px;}
-@media (max-width:768px){
-  .filters-toggle-row{display:block;}
-  #machinesFilterBar, #logsFilterBar{
-    display:none;background:var(--white);border:1px solid var(--grey-light);border-radius:8px;
-    padding:12px;margin-bottom:16px;
-  }
-  #machinesFilterBar.open, #logsFilterBar.open{
-    display:grid;grid-template-columns:1fr 1fr;gap:8px;
-  }
-  #machinesFilterBar.open input, #machinesFilterBar.open select,
-  #logsFilterBar.open input, #logsFilterBar.open select{
-    font-size:13px;padding:9px 10px;
-  }
-  #machinesFilterBar.open button, #logsFilterBar.open button{
-    grid-column:span 2;
-  }
-}
-@media (max-width:420px){
-  #machinesFilterBar.open, #logsFilterBar.open{grid-template-columns:1fr;}
-  #machinesFilterBar.open button, #logsFilterBar.open button{grid-column:span 1;}
-}
+        <label for="logType">Log Type</label>
+        <select id="logType" class="log-type-select" required>
+          <option value="">Select type&hellip;</option>
+          <option value="Preventive">Preventive Maintenance</option>
+          <option value="Breakdown">Breakdown Maintenance</option>
+        </select>
 
-/* ============ CUSTOM ROLES ============ */
-.permission-checklist{display:flex;flex-direction:column;gap:10px;margin-top:8px;}
-.permission-check{display:flex;align-items:center;gap:8px;font-family:'IBM Plex Sans',sans-serif;font-size:13.5px;text-transform:none;letter-spacing:0;color:var(--text);cursor:pointer;}
-.permission-check input{width:auto;flex-shrink:0;}
+        <div id="breakdownFields" style="display:none;">
+          <div class="row2">
+            <div>
+              <label for="logReportedBy">Reported By</label>
+              <input id="logReportedBy" placeholder="Operator/supervisor who raised the slip">
+            </div>
+            <div>
+              <label for="logPriority">Priority</label>
+              <select id="logPriority"><option>High</option><option selected>Medium</option><option>Low</option></select>
+            </div>
+          </div>
+        </div>
 
-/* ============ SETTINGS PAGE ============ */
-body.settings-open{overflow:hidden;}
-.settings-page{position:fixed;inset:0;background:var(--bg);z-index:100;overflow-y:auto;-webkit-overflow-scrolling:touch;}
-.settings-bar{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:14px;background:var(--white);border-bottom:1px solid var(--grey-light);padding:12px 20px;}
-.settings-title{font-size:18px;margin:0;color:var(--navy);}
-.settings-body{max-width:640px;margin:0 auto;padding:20px 16px 60px;}
-.settings-card{max-width:none;margin-bottom:18px;}
-.settings-card h2{font-size:15px;margin-bottom:10px;}
-.settings-readonly{display:flex;gap:32px;flex-wrap:wrap;margin-top:16px;}
-.settings-readonly span{display:block;font-size:11px;color:var(--grey);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;}
-.settings-readonly b{font-size:14px;color:var(--navy);font-weight:600;}
+        <div class="row2">
+          <div>
+            <label for="logStartDate">Start Date</label>
+            <input type="date" id="logStartDate" required>
+          </div>
+          <div>
+            <label for="logStartTime">Start Time</label>
+            <input type="time" id="logStartTime" required>
+          </div>
+        </div>
+        <div class="row2">
+          <div>
+            <label for="logEndDate">End Date <span class="label-note">(auto-fills from Start Date; only change for multi-day work)</span></label>
+            <input type="date" id="logEndDate">
+          </div>
+          <div>
+            <label for="logEndTime">End Time</label>
+            <input type="time" id="logEndTime" required>
+          </div>
+        </div>
 
-/* Category groups in machine lists */
-.group-head{position:sticky;top:0;z-index:2;background:var(--navy-pale);color:var(--navy);font-weight:700;font-size:13px;letter-spacing:.04em;text-transform:uppercase;padding:8px 12px;border-radius:6px;margin:10px 0 6px;}
-.group-head span{font-weight:400;color:var(--grey);text-transform:none;letter-spacing:0;margin-left:6px;}
-.group-head.small{margin:0;border-radius:0;font-size:11px;padding:6px 14px;}
-.group-row td{background:var(--navy-pale);color:var(--navy);font-weight:700;font-size:13px;text-transform:uppercase;letter-spacing:.04em;padding:8px 12px;}
-.group-row td span{font-weight:400;color:var(--grey);text-transform:none;}
-.group-row{cursor:default;}
-#findingsList,#machineFindingsList{max-height:420px;overflow-y:auto;padding-right:4px;}
+        <div class="row2">
+          <div>
+            <label>Who worked on it <span class="label-note">(select one or more)</span></label>
+            <div class="staff-picker" id="logStaffPicker">
+              <button type="button" class="staff-picker-btn" id="logStaffBtn">Select people&hellip;</button>
+              <div class="staff-picker-panel" id="logStaffPanel" style="display:none;"></div>
+            </div>
+            <input id="logTech" placeholder="Other name, if not on the list (optional)" style="margin-top:8px;">
+          </div>
+          <div>
+            <label for="logDowntime">Downtime (hours) <span class="label-note">(calculated)</span></label>
+            <input id="logDowntime" type="text" readonly tabindex="-1" placeholder="Fill in Start/End above">
+          </div>
+        </div>
+        <div class="form-error" id="logTimeError" style="display:none;"></div>
 
-/* ============ KANBAN ============ */
-body.kb-modal-open{overflow:hidden;}
-.kb-board-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px;}
-.kb-board-tile{--bc:#0B2545;background:var(--white);border:1px solid var(--grey-lighter);border-radius:10px;overflow:hidden;cursor:pointer;text-align:left;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(11,37,69,.08);transition:transform .12s,box-shadow .12s;font:inherit;color:inherit;padding:0;}
-.kb-board-tile:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(11,37,69,.14);}
-.kb-board-tile-bar{height:8px;background:var(--bc);}
-.kb-board-tile-body{padding:14px 16px 16px;display:flex;flex-direction:column;gap:8px;flex:1;}
-.kb-board-tile-name{font-family:'Oswald',sans-serif;font-size:18px;color:var(--navy);text-transform:uppercase;letter-spacing:.02em;}
-.kb-board-tile-desc{font-size:13px;color:var(--grey);min-height:18px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
-.kb-board-tile-stats{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--grey);flex-wrap:wrap;}
-.kb-board-new{align-items:center;justify-content:center;gap:6px;min-height:150px;border:2px dashed var(--grey-light);background:transparent;box-shadow:none;color:var(--navy);font-weight:600;font-size:14px;}
-.kb-board-new span{font-size:32px;line-height:1;}
-.kb-progress{height:6px;background:var(--grey-lighter);border-radius:4px;overflow:hidden;}
-.kb-progress span{display:block;height:100%;background:#2e9e6b;}
-.kb-overdue-pill{background:#fde8e8;color:#b02a2a;border-radius:10px;padding:1px 8px;font-weight:600;}
-.kb-view-pill{background:var(--navy-pale);color:var(--navy);border-radius:10px;padding:1px 8px;}
-.kb-avatars{display:flex;align-items:center;}
-.kb-avatars .kb-avatar{margin-right:-6px;border:2px solid var(--white);}
-.kb-avatar{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;flex:none;}
-.kb-avatar.more{background:var(--grey);}
-.kb-board-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;border-radius:10px;background:var(--white);border:1px solid var(--grey-lighter);border-left:8px solid var(--bc,#0B2545);margin-bottom:10px;}
-.kb-board-title{flex:1;min-width:160px;}
-.kb-board-title h2{font-family:'Oswald',sans-serif;font-size:20px;color:var(--navy);text-transform:uppercase;margin:0;}
-.kb-board-sub{font-size:12px;color:var(--grey);}
-.kb-head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-.kb-filters{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
-.kb-search{max-width:260px;}
-.kb-lblsel{max-width:180px;}
-.kb-mine{white-space:nowrap;}
-.kb-columns{display:flex;gap:12px;align-items:flex-start;overflow-x:auto;padding-bottom:16px;min-height:60vh;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;}
-.kb-col{flex:0 0 290px;max-width:86vw;background:#eef1f6;border-radius:10px;display:flex;flex-direction:column;max-height:calc(100vh - 230px);scroll-snap-align:start;}
-.kb-col-head{display:flex;align-items:center;gap:8px;padding:10px 12px 6px;}
-.kb-col-name{font-weight:700;color:var(--navy);font-size:14px;flex:1;text-transform:uppercase;letter-spacing:.03em;}
-.kb-donetag{color:#2e9e6b;}
-.kb-col-count{font-size:12px;color:var(--grey);background:#dfe5ee;border-radius:10px;padding:0 8px;}
-.kb-col-menu{background:none;border:none;font-size:20px;line-height:1;cursor:pointer;color:var(--grey);padding:0 4px;}
-.kb-col-body{padding:4px 8px;overflow-y:auto;flex:1;min-height:30px;display:flex;flex-direction:column;gap:8px;}
-.kb-col-foot{padding:6px 8px 10px;}
-.kb-add-card,.kb-add-col{width:100%;text-align:left;background:none;border:none;color:var(--grey);font:inherit;font-size:13px;padding:8px;border-radius:6px;cursor:pointer;}
-.kb-add-card:hover,.kb-add-col:hover{background:#dfe5ee;color:var(--navy);}
-.kb-col-new{background:transparent;border:2px dashed var(--grey-light);max-height:none;}
-.kb-newcard-actions{display:flex;gap:8px;margin-top:6px;}
-.kb-card{background:var(--white);border-radius:8px;padding:9px 10px;box-shadow:0 1px 2px rgba(11,37,69,.18);cursor:pointer;touch-action:pan-x pan-y;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;}
-.kb-card:hover{box-shadow:0 3px 8px rgba(11,37,69,.22);}
-.kb-card.is-done .kb-card-title{text-decoration:line-through;color:var(--grey);}
-.kb-card-labels{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;}
-.kb-card-labels span{color:#fff;font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px;}
-.kb-card-main{display:flex;gap:8px;align-items:flex-start;}
-.kb-card-check{margin-top:3px;width:16px;height:16px;flex:none;cursor:pointer;accent-color:#2e9e6b;}
-.kb-card-title{font-size:14px;line-height:1.35;word-break:break-word;}
-.kb-card-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:7px;font-size:11px;color:var(--grey);}
-.kb-chip{background:#eef1f6;border-radius:4px;padding:1px 6px;}
-.kb-chip.ok{background:#dff3e8;color:#1f7a50;}
-.kb-prio{border-radius:4px;padding:1px 6px;font-weight:700;}
-.kb-prio.p-low{background:#e6f0fb;color:#2f6fb5;}
-.kb-prio.p-med{background:#fdf3d6;color:#8a6a0a;}
-.kb-prio.p-high{background:#fde7d6;color:#b25316;}
-.kb-prio.p-urg{background:#fde1e1;color:#b02a2a;}
-.kb-due{border-radius:4px;padding:1px 6px;background:#eef1f6;}
-.kb-due.soon{background:#fdf3d6;color:#8a6a0a;}
-.kb-due.late{background:#fde1e1;color:#b02a2a;font-weight:700;}
-.kb-card-asg{margin-left:auto;display:flex;}
-.kb-card-asg .kb-avatar{margin-left:-5px;border:2px solid var(--white);}
-.kb-ghost{position:fixed;z-index:3000;pointer-events:none;opacity:.92;transform:rotate(2.5deg);box-shadow:0 12px 28px rgba(11,37,69,.35);margin:0;}
-.kb-placeholder{background:#d5dcea;border:2px dashed #9fb0cc;border-radius:8px;}
-.kb-overlay{position:fixed;inset:0;background:rgba(11,37,69,.5);z-index:2500;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 12px;}
-.kb-modal{position:relative;background:var(--white);border-radius:12px;padding:22px 22px 18px;width:100%;max-width:480px;box-shadow:0 20px 50px rgba(0,0,0,.3);}
-.kb-modal-wide{max-width:680px;}
-.kb-modal-x{position:absolute;top:8px;right:12px;border:none;background:none;font-size:28px;line-height:1;cursor:pointer;color:var(--grey);}
-.kb-modal-title{font-family:'Oswald',sans-serif;text-transform:uppercase;color:var(--navy);font-size:19px;margin:0 28px 10px 0;}
-.kb-label{display:block;font-size:12px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.04em;margin:14px 0 5px;}
-.kb-input{width:100%;padding:9px 10px;border:1px solid var(--grey-light);border-radius:6px;font:inherit;font-size:14px;background:var(--white);color:var(--text);box-sizing:border-box;}
-textarea.kb-input{resize:vertical;}
-.kb-modal-actions{display:flex;gap:10px;align-items:center;justify-content:flex-end;margin-top:18px;}
-.kb-danger{color:#b02a2a !important;border-color:#e6b6b6 !important;}
-.kb-swatches{display:flex;gap:8px;flex-wrap:wrap;}
-.kb-swatch{width:28px;height:28px;border-radius:50%;border:3px solid transparent;cursor:pointer;}
-.kb-swatch.on{border-color:var(--white);box-shadow:0 0 0 2px var(--navy);}
-.kb-check-row{display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;}
-.kb-check-row small{color:var(--grey);margin-left:auto;}
-.kb-member-pick{max-height:170px;overflow-y:auto;border:1px solid var(--grey-lighter);border-radius:6px;padding:8px;display:flex;flex-direction:column;gap:8px;}
-.kb-cm-head{display:flex;gap:10px;align-items:center;margin-right:28px;}
-.kb-big-check{width:22px;height:22px;accent-color:#2e9e6b;flex:none;}
-.kb-cm-title{flex:1;font-family:'Oswald',sans-serif;font-size:20px;border:1px solid transparent;border-radius:6px;padding:4px 6px;color:var(--navy);background:transparent;min-width:0;}
-.kb-cm-title:focus{border-color:var(--grey-light);background:var(--white);outline:none;}
-.kb-cm-sub{font-size:12px;color:var(--grey);margin:2px 0 4px 32px;}
-.kb-cm-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px;}
-@media(max-width:560px){.kb-cm-grid{grid-template-columns:1fr;}}
-.kb-pills{display:flex;flex-wrap:wrap;gap:6px;}
-.kb-pill{border:1px solid var(--grey-light);background:var(--white);border-radius:16px;padding:3px 10px 3px 4px;font:inherit;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;color:var(--text);}
-.kb-pill.on{background:var(--navy);color:#fff;border-color:var(--navy);}
-.kb-pill.kb-lbl{padding:3px 12px;border-color:var(--lc);color:var(--lc);}
-.kb-pill.kb-lbl.on{background:var(--lc);color:#fff;border-color:var(--lc);}
-.kb-links{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
-.kb-linkbtn{background:var(--navy-pale);border:1px solid var(--grey-lighter);border-radius:6px;padding:6px 10px;font:inherit;font-size:13px;color:var(--navy);cursor:pointer;text-align:left;}
-.kb-checklist{display:flex;flex-direction:column;gap:2px;margin:8px 0;}
-.kb-cl-row{display:flex;align-items:center;gap:8px;padding:4px 0;}
-.kb-cl-row.done .kb-cl-text{text-decoration:line-through;color:var(--grey);}
-.kb-cl-text{flex:1;font-size:14px;word-break:break-word;}
-.kb-icon-btn{border:none;background:none;color:var(--grey);font-size:20px;cursor:pointer;line-height:1;}
-.kb-icon-btn:hover{color:#b02a2a;}
-.kb-inline-add{display:flex;gap:8px;align-items:center;margin-top:6px;}
-.kb-muted{font-size:12px;color:var(--grey);font-weight:400;text-transform:none;letter-spacing:0;}
-.kb-attachments{display:flex;flex-wrap:wrap;gap:10px;}
-.kb-att{width:104px;position:relative;background:#eef1f6;border-radius:6px;padding:4px;}
-.kb-att img{width:100%;height:72px;object-fit:cover;border-radius:4px;display:block;}
-.kb-att-file{display:flex;height:72px;align-items:center;justify-content:center;font-size:30px;text-decoration:none;}
-.kb-att-name{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px;}
-.kb-att .kb-icon-btn{position:absolute;top:0;right:2px;background:rgba(255,255,255,.85);border-radius:50%;width:20px;height:20px;font-size:16px;padding:0;}
-.kb-comment{display:flex;gap:10px;margin:8px 0;font-size:14px;}
-.kb-comment-body{white-space:pre-wrap;word-break:break-word;margin-top:2px;}
-.kb-link-del{background:none;border:none;color:var(--grey);font-size:12px;cursor:pointer;padding:0;text-decoration:underline;}
-.kb-mem-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--grey-lighter);flex-wrap:wrap;}
-.kb-mem-name{flex:1;min-width:120px;font-size:14px;}
-.kb-mem-name small{display:block;color:var(--grey);font-size:12px;}
-.kb-role-tag{font-size:11px;font-weight:700;border-radius:10px;padding:2px 8px;background:#eef1f6;color:var(--grey);}
-.kb-role-tag.owner{background:var(--navy);color:#fff;}
-.kb-lbl-row{display:flex;gap:8px;align-items:center;margin-bottom:6px;}
-.kb-lbl-row input[type=color]{width:38px;height:34px;padding:0;border:1px solid var(--grey-light);border-radius:6px;background:none;flex:none;}
-.kb-tabs{display:flex;gap:6px;margin-bottom:8px;}
-.kb-tab{border:1px solid var(--grey-light);background:var(--white);border-radius:16px;padding:5px 14px;font:inherit;font-size:13px;cursor:pointer;}
-.kb-tab.on{background:var(--navy);color:#fff;border-color:var(--navy);}
-.kb-sug{max-height:48vh;overflow-y:auto;}
-.kb-sug-row{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--grey-lighter);font-size:14px;}
-@media(max-width:640px){
-  .kb-col{flex-basis:84vw;}
-  .kb-col{max-height:calc(100vh - 260px);}
-  .kb-modal{padding:18px 14px 14px;}
-}
+        <label for="logFindings">Findings / Diagnosis</label>
+        <textarea id="logFindings" required placeholder="What was found upon inspection"></textarea>
 
-.kb-columns.kb-dragging{scroll-snap-type:none;}
-.kb-mine{font-family:inherit !important;text-transform:none !important;letter-spacing:0 !important;font-size:14px !important;color:var(--text) !important;}
+        <label for="logActions">Actions Taken</label>
+        <textarea id="logActions" required placeholder="Repairs, replacements, adjustments made"></textarea>
 
-.kb-col-head{cursor:grab;touch-action:pan-x pan-y;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;}
-.kb-ghost-col{background:#eef1f6;border-radius:10px;max-height:60vh;overflow:hidden;transform:rotate(1.5deg);}
-.kb-col-ph{flex:0 0 auto;align-self:flex-start;}
-.kb-ghost.kb-ghost-col{opacity:.9;}
+        <label for="logParts">Parts / Materials Used</label>
+        <input id="logParts" placeholder="e.g. 2x hydraulic seals, feed roller bearing">
 
-/* Footer credit */
-.app-footer{display:flex;justify-content:center;align-items:center;gap:7px;padding:22px 16px 28px;font-size:12px;color:var(--grey);}
-.app-footer a{display:inline-flex;align-items:center;gap:7px;color:var(--grey);text-decoration:none;opacity:.78;transition:opacity .15s;}
-.app-footer a:hover,.app-footer a:focus-visible{opacity:1;}
-.app-footer img{height:20px;width:auto;display:block;}
-.app-footer .tb-name{font-weight:700;color:var(--navy);letter-spacing:.02em;}
+        <label for="logStatus">Status</label>
+        <select id="logStatus" required>
+          <option value="Pending">Pending &mdash; needs follow-up</option>
+          <option value="Completed">Completed &mdash; issue resolved</option>
+        </select>
+        <div class="label-note" id="logStatusLockedNote" style="display:none;margin-top:4px;">This log has been Reviewed - status is locked and can't be changed here.</div>
 
-/* ===== Boards page refinements ===== */
-/* Checkboxes/file inputs must not inherit the global input{width:100%} */
-.kb-overlay input[type=checkbox],.kb-overlay input[type=radio],#view-kanban input[type=checkbox],#view-kanban-board input[type=checkbox]{width:18px;height:18px;padding:0;margin:0;flex:none;accent-color:#2e9e6b;}
-.kb-overlay input[type=file]{width:auto;max-width:100%;padding:6px 0;border:none;background:none;}
-.kb-cl-row{align-items:flex-start;padding:5px 0;}
-.kb-cl-row input[type=checkbox]{margin-top:2px;}
-.kb-cl-text{flex:1 1 auto;min-width:0;line-height:1.4;}
-.kb-inline-add{flex-wrap:wrap;}
-.kb-inline-add .kb-input{flex:1 1 180px;min-width:0;width:auto;}
+        <div id="logAttachmentsField">
+          <label for="logAttachments">Attach Files <span class="label-note">(photos or PDFs, up to 5 files, 15MB each)</span></label>
+          <input id="logAttachments" type="file" multiple accept="image/*,application/pdf">
+        </div>
 
-/* Columns are as tall as the screen */
-.kb-col{max-height:100vh;max-height:100dvh;}
-@media(max-width:640px){.kb-col{max-height:100vh;max-height:100dvh;}}
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" id="logFormSubmit">Submit Log</button>
+          <button type="button" class="btn-ghost" onclick="switchView('logs')">Cancel</button>
+          <button type="button" class="log-delete-btn" id="logFormDeleteBtn" style="display:none;margin-left:auto;" onclick="deleteLog(editingLogId, logCache[editingLogId] ? logCache[editingLogId].machineCode : 'this machine')">&#128465; Delete Log</button>
+        </div>
+      </form>
+    </div>
+  </section>
 
-/* Card cover photo */
-.kb-card-cover{margin:-9px -10px 8px;border-radius:8px 8px 0 0;overflow:hidden;background:#d5dcea;}
-.kb-card-cover img{display:block;width:100%;height:120px;object-fit:cover;pointer-events:none;}
-.kb-cm-cover{margin:-6px 0 12px;border-radius:8px;overflow:hidden;position:relative;background:#d5dcea;}
-.kb-cm-cover img{display:block;width:100%;max-height:260px;object-fit:cover;}
-.kb-cm-cover button{position:absolute;right:8px;bottom:8px;background:rgba(255,255,255,.92);}
-.kb-att-cover{display:block;width:100%;margin-top:3px;border:1px solid #9fb0cc;background:#fff;color:var(--navy);font:inherit;font-size:11px;border-radius:4px;padding:2px 0;cursor:pointer;text-align:center;}
-.kb-att-cover.on{background:var(--navy);color:#fff;border-color:var(--navy);cursor:default;}
+  <!-- ============ REPORTS ============ -->
+  <section class="view" id="view-reports">
+    <div class="page-head">
+      <h2 class="page-title">Maintenance Reports</h2>
+    </div>
+    <nav class="subtabs">
+      <button data-report="daily" class="active">Daily</button>
+      <button data-report="monthly">Monthly</button>
+      <button data-report="yearly">Yearly</button>
+    </nav>
 
-/* ~25% stronger contrast on the Boards page */
-#view-kanban,#view-kanban-board,.kb-overlay{--grey:#4b5360;--grey-light:#b4bcc9;--grey-lighter:#cdd3dd;--text:#0c121b;}
-#view-kanban .hint,#view-kanban-board .hint{color:#3f4753;}
-.kb-col{background:#dbe2ec;border:1px solid #b9c4d6;}
-.kb-col-name{color:#06172e;}
-.kb-col-count{background:#bfc9da;color:#1b2430;}
-.kb-add-card:hover,.kb-add-col:hover{background:#c6d0e0;}
-.kb-card{border:1px solid #b9c4d6;box-shadow:0 1px 3px rgba(11,37,69,.3);}
-.kb-card:hover{box-shadow:0 4px 10px rgba(11,37,69,.34);border-color:#8fa1bf;}
-.kb-card-title{color:#0c121b;font-weight:500;}
-.kb-card.is-done .kb-card-title{color:#4b5360;}
-.kb-card-meta{color:#3d4552;}
-.kb-chip,.kb-due{background:#d3dbe8;color:#1b2430;}
-.kb-chip.ok{background:#bfe6d0;color:#13613c;}
-.kb-prio.p-low{background:#cfe2f8;color:#1b5391;}
-.kb-prio.p-med{background:#f8e6a8;color:#6b5100;}
-.kb-prio.p-high{background:#f8cfae;color:#8f3f0c;}
-.kb-prio.p-urg{background:#f6bcbc;color:#8f1d1d;}
-.kb-due.soon{background:#f8e6a8;color:#6b5100;}
-.kb-due.late{background:#f6bcbc;color:#8f1d1d;}
-.kb-card-labels span{font-size:10.5px;text-shadow:0 1px 0 rgba(0,0,0,.25);}
-.kb-board-head{border-color:#b4bcc9;border-left-width:8px;}
-.kb-board-sub,.kb-board-tile-desc,.kb-board-tile-stats{color:#3f4753;}
-.kb-board-tile{border-color:#b4bcc9;box-shadow:0 1px 4px rgba(11,37,69,.22);}
-.kb-input{border-color:#8d97a8;}
-.kb-label{color:#06172e;}
-.kb-pill{border-color:#8d97a8;}
-.kb-placeholder{background:#c3cde0;border-color:#7f93b5;}
-.kb-att{background:#d3dbe8;}
-.kb-linkbtn{border-color:#a6b3c7;}
-.kb-role-tag{background:#d3dbe8;color:#1b2430;}
-.kb-mem-row,.kb-sug-row{border-bottom-color:#b4bcc9;}
-.kb-ghost-col{background:#dbe2ec;}
-#view-kanban .app-footer,#view-kanban-board .app-footer{color:#3f4753;}
-#view-kanban .app-footer a,#view-kanban-board .app-footer a{opacity:.9;color:#3f4753;}
-.kb-modal-x{z-index:3;width:32px;height:32px;line-height:30px;padding:0;text-align:center;border-radius:50%;background:rgba(255,255,255,.92);}
+    <div class="report-view active" id="report-daily">
+      <div class="search-bar">
+        <input type="date" id="dailyDate">
+                <button class="btn-primary" onclick="downloadDailyPDF()">&#11015; Download PDF</button>
+      </div>
+      <div class="stat-row">
+        <div class="mini-stat"><div class="mini-value" id="dailyTotalLogs">0</div><div class="mini-label">Total Logs</div></div>
+        <div class="mini-stat"><div class="mini-value" id="dailyPreventive">0</div><div class="mini-label">Preventive</div></div>
+        <div class="mini-stat"><div class="mini-value" id="dailyBreakdown">0</div><div class="mini-label">Breakdown</div><div class="mini-delta" id="dailyBreakdownDelta"></div></div>
+        <div class="mini-stat"><div class="mini-value" id="dailyDowntime">0</div><div class="mini-label">Downtime (hrs)</div><div class="mini-delta" id="dailyDowntimeDelta"></div></div>
+      </div>
+      <div class="chart-panel"><h3>Logs by Type</h3><div class="chart-box small"><canvas id="dailyChart"></canvas></div></div>
+      <div class="report-summary" id="dailySummary"></div>
+      <div class="panel-block"><h3>Logs on This Date</h3><div id="dailyLogsList"></div></div>
+    </div>
 
-.boards-access-row{display:flex;align-items:center;gap:10px;padding:6px 0;cursor:pointer;}
-.boards-access-row input[type=checkbox]{width:auto;flex:none;}
+    <div class="report-view" id="report-monthly">
+      <div class="search-bar">
+        <input type="month" id="monthlyDate">
+                <button class="btn-primary" onclick="downloadMonthlyPDF()">&#11015; Download PDF</button>
+      </div>
+      <div class="stat-row">
+        <div class="mini-stat"><div class="mini-value" id="monthlyTotalLogs">0</div><div class="mini-label">Total Logs</div></div>
+        <div class="mini-stat"><div class="mini-value" id="monthlyPreventive">0</div><div class="mini-label">Preventive</div></div>
+        <div class="mini-stat"><div class="mini-value" id="monthlyBreakdown">0</div><div class="mini-label">Breakdown</div><div class="mini-delta" id="monthlyBreakdownDelta"></div></div>
+        <div class="mini-stat"><div class="mini-value" id="monthlyDowntime">0</div><div class="mini-label">Downtime (hrs)</div><div class="mini-delta" id="monthlyDowntimeDelta"></div></div>
+      </div>
+      <div class="chart-panel"><h3>Daily Log Volume This Month</h3><div class="chart-box"><canvas id="monthlyChart"></canvas></div></div>
+      <div class="report-summary" id="monthlySummary"></div>
+      <div class="panel-block"><h3>Parts / Items Used This Month</h3><div id="monthlyPartsList"></div></div>
+    </div>
 
-/* Staff picker, staff list and performance */
-.staff-picker{position:relative;}
-.staff-picker-btn{width:100%;text-align:left;background:#fff;border:1px solid var(--grey-light,#cfd4da);border-radius:8px;padding:10px 12px;font:inherit;cursor:pointer;min-height:42px;}
-.staff-picker-panel{position:absolute;left:0;right:0;top:100%;z-index:30;background:#fff;border:1px solid var(--grey-light,#cfd4da);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);max-height:300px;overflow:auto;padding:6px 0;}
-.staff-picker-group{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--grey,#6a7179);padding:8px 12px 4px;}
-.staff-picker-item{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;}
-.staff-picker-item:hover{background:var(--navy-pale,#eef2f8);}
-.staff-picker-item input{width:auto;flex:none;margin:0;}
-.staff-picker-item .label-note{margin-left:auto;}
-.staff-picker-empty{padding:12px;color:var(--grey,#6a7179);font-size:13px;}
-.staff-add-row{display:flex;gap:10px;flex-wrap:wrap;}
-.staff-add-row input{flex:2;min-width:180px;}
-.staff-add-row select{flex:1;min-width:130px;}
-.staff-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 0;border-bottom:1px solid var(--grey-light,#e3e6e4);}
-.staff-row .staff-name{flex:2;min-width:160px;font-weight:600;}
-.staff-row select{flex:1;min-width:120px;}
-.staff-row.inactive .staff-name{opacity:.55;text-decoration:line-through;}
-.perf-disc-row{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin:14px 0;}
-.perf-disc-card{background:#fff;border:1px solid var(--grey-light,#e3e6e4);border-radius:10px;padding:14px 16px;}
-.perf-disc-card h4{margin:0 0 6px;font-size:15px;}
-.perf-disc-card div{font-size:13.5px;line-height:1.6;}
-.table-scroll{overflow-x:auto;}
-table.perf-table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:820px;}
-table.perf-table th,table.perf-table td{padding:9px 12px;text-align:right;border-bottom:1px solid var(--grey-light,#e3e6e4);white-space:nowrap;}
-table.perf-table th:first-child,table.perf-table td:first-child,table.perf-table th:nth-child(2),table.perf-table td:nth-child(2){text-align:left;}
-table.perf-table th{background:var(--grey-lighter,#f3f4f5);color:var(--navy,#0B2545);font-weight:600;}
-@media (max-width:640px){.perf-disc-row{grid-template-columns:1fr;}}
+    <div class="report-view" id="report-yearly">
+      <div class="search-bar">
+        <input type="number" id="yearlyDate" placeholder="2026" style="max-width:120px;">
+                <button class="btn-primary" onclick="downloadYearlyPDF()">&#11015; Download PDF</button>
+      </div>
+      <div class="stat-row">
+        <div class="mini-stat"><div class="mini-value" id="yearlyTotalLogs">0</div><div class="mini-label">Total Logs</div></div>
+        <div class="mini-stat"><div class="mini-value" id="yearlyPreventive">0</div><div class="mini-label">Preventive</div></div>
+        <div class="mini-stat"><div class="mini-value" id="yearlyBreakdown">0</div><div class="mini-label">Breakdown</div><div class="mini-delta" id="yearlyBreakdownDelta"></div></div>
+        <div class="mini-stat"><div class="mini-value" id="yearlyDowntime">0</div><div class="mini-label">Downtime (hrs)</div><div class="mini-delta" id="yearlyDowntimeDelta"></div></div>
+      </div>
+      <div class="chart-panel"><h3>Monthly Log Volume This Year</h3><div class="chart-box"><canvas id="yearlyChart"></canvas></div></div>
+      <div class="report-summary" id="yearlySummary"></div>
+      <div class="panel-block"><h3>Parts / Items Used This Year <span class="label-note">(most recent 200)</span></h3><div id="yearlyPartsList"></div></div>
+    </div>
+  </section>
 
-/* ---- Report Downtime ---- */
-.page-head-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
-.btn-alert{background:var(--red);color:#fff;border:none;font-family:'Oswald',sans-serif;font-weight:600;letter-spacing:0.4px;text-transform:uppercase;font-size:13.5px;padding:11px 20px;border-radius:5px;cursor:pointer;}
-.btn-alert:hover{filter:brightness(1.1);}
-.btn-alert:disabled{opacity:0.5;cursor:not-allowed;}
-.dt-overlay{position:fixed;inset:0;background:rgba(8,20,40,0.6);z-index:1000;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 12px;}
-.dt-card{background:#fff;border-radius:10px;border-top:6px solid var(--red);width:100%;max-width:460px;padding:20px 20px 22px;box-shadow:0 12px 40px rgba(0,0,0,0.35);}
-.dt-card h3{margin:0 0 4px;font-family:'Oswald',sans-serif;text-transform:uppercase;color:var(--navy);}
-.dt-hint{margin:0 0 14px;color:var(--grey);font-size:13px;}
-.dt-card label{display:block;margin:12px 0 4px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--grey);}
-.dt-card input,.dt-card select,.dt-card textarea{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #cfd6e2;border-radius:6px;font-size:15px;font-family:inherit;}
-.dt-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-.dt-error{margin-top:12px;color:var(--red);font-size:13px;}
-.dt-actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap;}
-.down-since{display:inline-block;margin-top:4px;font-size:12px;font-weight:600;color:var(--red);}
-.down-reason{color:var(--grey);font-size:12px;margin-top:2px;}
-.down-row-actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;}
 
-/* ---- Notifications bell + panel ---- */
-.bell-btn{position:relative;background:var(--navy-pale);border:none;border-radius:50%;width:34px;height:34px;font-size:16px;cursor:pointer;line-height:1;flex-shrink:0;}
-.bell-badge{position:absolute;top:-4px;right:-4px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--red);color:#fff;font:700 10px/17px 'IBM Plex Mono',monospace;text-align:center;}
-.notif-panel{position:fixed;top:60px;right:12px;width:min(380px,calc(100vw - 24px));max-height:70vh;overflow-y:auto;background:#fff;border:1px solid var(--grey-light);border-radius:10px;box-shadow:0 12px 32px rgba(11,37,69,0.25);z-index:1100;}
-.notif-head{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid var(--grey-light);position:sticky;top:0;background:#fff;}
-.notif-item{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid var(--grey-light);cursor:pointer;}
-.notif-item.unread{background:var(--navy-pale);}
-.notif-ico{font-size:18px;flex-shrink:0;}
-.notif-title{font-weight:600;font-size:13px;color:var(--navy);}
-.notif-body{font-size:12px;color:#444;margin-top:2px;}
-.notif-time{font-size:11px;color:#888;margin-top:3px;font-family:'IBM Plex Mono',monospace;}
-.notif-empty{padding:18px;text-align:center;color:#888;font-size:13px;}
+  <!-- ============ STAFF LIST ============ -->
+  <section class="view" id="view-staff">
+    <button class="detail-back" onclick="switchView('logs')">&larr; Back to Logs</button>
+    <div class="page-head"><h2 class="page-title">Staff List</h2></div>
+    <div class="hint" style="margin-bottom:14px;">Technicians and engineers appear in the "Who worked on it" dropdown on the log form. Pick Electrical or Mechanical for each person. Someone who already has logs is switched to inactive instead of deleted, so their history stays.</div>
+    <div class="panel-block">
+      <form id="staffAddForm" class="staff-add-row">
+        <input id="staffNewName" placeholder="Full name" required>
+        <select id="staffNewTitle"><option>Technician</option><option>Engineer</option></select>
+        <select id="staffNewDiscipline"><option>Electrical</option><option>Mechanical</option></select>
+        <button class="btn-primary" type="submit">Add</button>
+      </form>
+    </div>
+    <div id="staffList"></div>
+  </section>
 
-/* live filters */
-.filter-count{font-size:12px;color:var(--grey);font-family:'IBM Plex Mono',monospace;white-space:nowrap;}
-.filter-active{border-color:var(--navy) !important;background:var(--navy-pale) !important;}
-.filter-badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:9px;background:var(--navy);color:#fff;font-size:11px;line-height:18px;text-align:center;}
+  <!-- ============ PM SCHEDULE ============ -->
+  <section class="view" id="view-pm">
+    <div class="page-head">
+      <h2 class="page-title">PM Schedule</h2>
+      <div class="view-toggle" id="pmTabs">
+        <button type="button" data-pmtab="due" class="active">Due</button>
+        <button type="button" data-pmtab="compliance">Compliance</button>
+        <button type="button" data-pmtab="shutdown">Shutdown</button>
+        <button type="button" data-pmtab="chart">Chart</button>
+      </div>
+    </div>
 
-/* Long organisation names: title shrinks/wraps instead of sliding under the bell and Log Out */
-@media (max-width:768px){
-  .plant-id{flex:1 1 0;min-width:0;}
-  .plant-id > div:last-child{min-width:0;flex:1 1 auto;}
-  h1{white-space:normal;font-size:clamp(13px,4vw,18px);line-height:1.15;overflow-wrap:anywhere;}
-  .header-logo{max-width:30vw;}
-  .header-right{flex-shrink:0;}
-}
+    <details class="pm-import" id="pmImportBox" style="display:none;">
+      <summary><b>Import PM data</b> <span class="hint" style="margin:0;">(managers only - tap to open)</span></summary>
+      <div class="pm-import-body">
+        <span class="hint" style="margin:0;">Choose the PM file prepared for your plant (.json).</span>
+        <select id="pmImportMode">
+          <option value="merge">Add new visits only</option>
+          <option value="replace">Replace upcoming planned visits</option>
+        </select>
+        <input type="file" id="pmImportFile">
+      </div>
+    </details>
 
-/* busy buttons (double-click protection) */
-button.is-busy{opacity:.65;cursor:progress;position:relative;}
-button.is-busy::after{content:'';display:inline-block;width:11px;height:11px;margin-left:8px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:-1px;animation:busyspin .7s linear infinite;}
-@keyframes busyspin{to{transform:rotate(360deg)}}
+    <div id="pmTabDue">
+      <div class="search-bar pm-filters">
+        <select id="pmScope">
+          <option value="overdue">Overdue</option>
+          <option value="today">Due today</option>
+          <option value="week" selected>Next 7 days</option>
+          <option value="month">Next 30 days</option>
+          <option value="quarter">Next 90 days</option>
+          <option value="year">Rest of this year</option>
+          <option value="upcoming">All upcoming</option>
+          <option value="range">Pick dates...</option>
+        </select>
+        <input type="date" id="pmFrom" style="display:none;" title="From">
+        <input type="date" id="pmTo" style="display:none;" title="To">
+        <select id="pmGroup"><option value="">All groups</option></select>
+        <select id="pmLevel">
+          <option value="">All levels</option>
+          <option value="W">Weekly</option><option value="M">Monthly</option><option value="Q">Quarterly</option>
+          <option value="H">Half-yearly</option><option value="A">Annual</option>
+        </select>
+        <input type="text" id="pmSearch" placeholder="Search machine name or code..." autocomplete="off">
+        <button type="button" class="btn-ghost" id="pmClear">Clear</button>
+        <span class="filter-count" id="pmCount"></span>
+      </div>
+      <div id="pmList"></div>
+    </div>
 
-/* report summary tables */
-.table-scroll{overflow-x:auto;}
-.summary-table{min-width:520px;}
-.summary-table tbody tr{cursor:default;}
-.share-bar{height:4px;background:var(--grey-lighter);border-radius:2px;margin-top:4px;min-width:60px;}
-.share-bar i{display:block;height:100%;background:var(--red);border-radius:2px;}
-.muted-sm{font-size:11px;color:var(--grey);}
-.kpi-line{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--text);}
-.kpi-line b{color:var(--navy);}
-.report-summary{display:block;}
+    <div id="pmTabCompliance" style="display:none;">
+      <div class="search-bar pm-filters">
+        <select id="pmPeriod">
+          <option value="month">This month</option>
+          <option value="lastmonth">Last month</option>
+          <option value="90">Last 90 days</option>
+          <option value="year">This year</option>
+        </select>
+        <button type="button" class="btn-ghost" data-pmact="xlsx">Download Excel</button>
+      </div>
+      <div id="pmSummary"></div>
+    </div>
 
-/* ===== PM Schedule ===== */
-.pm-filters{flex-wrap:wrap;gap:8px;align-items:center;}
-.pm-filters input[type=text]{flex:1 1 180px;min-width:0;}
-.pm-date-head{font-family:'Oswald',sans-serif;text-transform:uppercase;font-size:13px;color:var(--navy);margin:18px 0 8px;letter-spacing:.4px;}
-.pm-today{background:var(--navy);color:#fff;border-radius:4px;padding:1px 7px;font-size:11px;margin-left:6px;}
-.pm-card{background:var(--white);border:1px solid var(--grey-light);border-left:4px solid var(--navy-light);border-radius:8px;padding:12px 14px;margin-bottom:10px;}
-.pm-card.late{border-left-color:var(--red);}
-.pm-card-top{display:flex;gap:12px;align-items:flex-start;}
-.pm-card-main{flex:1;min-width:0;}
-.pm-machine{font-weight:600;color:var(--navy);overflow-wrap:anywhere;}
-.pm-machine small{font-family:'IBM Plex Mono',monospace;font-weight:400;color:var(--grey);margin-left:4px;}
-.pm-meta{font-size:12.5px;color:var(--grey);margin-top:2px;}
-.pm-card-side{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;}
-.pm-late{color:var(--red);font-size:12.5px;font-weight:600;}
-.pm-lv{width:30px;height:30px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0;}
-.pm-lv-W{background:#DDEBF7;color:#1F4E78;} .pm-lv-M{background:#BDD7EE;color:#1F4E78;}
-.pm-lv-Q{background:#C6E0B4;color:#375623;} .pm-lv-H{background:#FFE699;color:#7F6000;}
-.pm-lv-A{background:#F4B183;color:#833C0B;} .pm-lv-S{background:#D9C3E8;color:#5B2C83;}
-.pm-status{font-size:11.5px;border-radius:10px;padding:2px 9px;background:var(--grey-light);color:var(--navy);}
-.pm-st-Done{background:#dff3e3;color:#1d6b33;} .pm-st-Inprogress{background:#fff1cc;color:#8a6100;} .pm-st-Skipped{background:#eee;color:#666;}
-.pm-note{font-size:12px;color:var(--grey);margin-top:6px;font-style:italic;}
-.pm-tasks{margin-top:8px;font-size:13px;}
-.pm-tasks summary{cursor:pointer;color:var(--navy);font-size:12.5px;}
-.pm-tasks ul{margin:6px 0 0 18px;padding:0;} .pm-tasks li{margin:2px 0;}
-.pm-shut-tasks{margin-top:6px;font-size:12.5px;color:#444;line-height:1.45;}
-.pm-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center;}
-.pm-actions .btn-primary,.pm-actions .btn-ghost{padding:9px 14px;font-size:13px;min-height:40px;}
-.pm-in{padding:9px 10px;border:1px solid var(--grey-light);border-radius:6px;font-size:14px;min-height:40px;}
-.pm-in-wide{flex:1 1 200px;min-width:0;}
-.pm-done-txt{color:#1d6b33;font-size:13px;font-weight:600;}
-.pm-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px;}
-.pm-bar{display:inline-block;width:70px;height:8px;background:var(--grey-light);border-radius:4px;overflow:hidden;vertical-align:middle;margin-right:6px;}
-.pm-bar-fill{height:100%;} .pm-bar-fill.good{background:#2e9e4f;} .pm-bar-fill.mid{background:#e0a100;} .pm-bar-fill.bad{background:#c9302c;}
-.pm-pct{font-size:12px;} .pm-na{color:var(--grey);}
-.pm-barcell{white-space:nowrap;}
-.pm-shut-total{margin:4px 0 12px;font-size:14px;}
-.pm-day{background:var(--white);border:1px solid var(--grey-light);border-radius:8px;margin-bottom:10px;padding:0 14px;}
-.pm-day>summary{cursor:pointer;padding:12px 0;font-size:14px;color:var(--navy);}
-.pm-day-count{float:right;font-size:12px;background:var(--grey-light);border-radius:10px;padding:2px 10px;}
-.pm-day-count.full{background:#dff3e3;color:#1d6b33;}
-.pm-shut-group{border-top:1px solid var(--grey-light);padding:10px 0;}
-.pm-shut-ghead{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;}
-.pm-shut-list{margin-top:6px;max-height:420px;overflow:auto;}
-.pm-shut-row{display:flex;gap:10px;align-items:center;padding:8px 2px;border-bottom:1px dashed var(--grey-light);font-size:13.5px;cursor:pointer;}
-.pm-shut-row input{width:20px;height:20px;flex-shrink:0;}
-.pm-shut-row span:nth-child(2){flex:1;min-width:0;overflow-wrap:anywhere;}
-.pm-shut-row small{font-family:'IBM Plex Mono',monospace;color:var(--grey);margin-left:4px;}
-.pm-shut-row.done{opacity:.7;}
-.pm-log-banner{background:#eef4fb;border:1px solid #bcd3ee;border-left:4px solid var(--navy);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:13.5px;line-height:1.5;}
-@media (max-width:640px){
-  .pm-card-top{flex-wrap:wrap;} .pm-card-side{flex-direction:row;align-items:center;width:100%;justify-content:flex-start;margin-left:42px;}
-  .pm-actions .btn-primary,.pm-actions .btn-ghost{flex:1 1 auto;}
-}
+    <div id="pmTabChart" style="display:none;">
+      <div class="search-bar pm-filters">
+        <select id="pmChView"><option value="month">Month by month</option><option value="year">All days of the year</option></select>
+        <select id="pmChMonth"><option value="1">January</option><option value="2">February</option><option value="3">March</option><option value="4">April</option><option value="5">May</option><option value="6">June</option><option value="7">July</option><option value="8">August</option><option value="9">September</option><option value="10">October</option><option value="11">November</option><option value="12">December</option></select>
+        <select id="pmChYear"></select>
+        <select id="pmChGroup"><option value="">All groups</option></select>
+        <select id="pmChLevel"><option value="">All levels</option><option value="nw">Hide weekly</option></select>
+        <input type="search" id="pmChSearch" placeholder="Search machine name or code">
+        <button type="button" class="btn-primary" data-pmact="xlsx">Download Excel</button>
+      </div>
+      <div id="pmChart"></div>
+    </div>
 
-.pm-import{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:#fff8e6;border:1px solid #f0d79a;border-radius:8px;padding:10px 14px;margin-bottom:14px;}
-.pm-import select,.pm-import input[type=file]{font-size:13px;}
+    <div id="pmTabShutdown" style="display:none;">
+      <div class="search-bar pm-filters">
+        <select id="pmShutYear"></select>
+        <button type="button" class="btn-ghost" data-pmact="xlsx">Download Excel</button>
+        <span class="hint" style="margin:0;">Annual service for the machines in the plant shutdown. Tick each machine when its day's work is done.</span>
+      </div>
+      <div id="pmShutdown"></div>
+    </div>
+  </section>
 
-.pm-file-btn{display:inline-block;cursor:pointer;position:relative;overflow:hidden;padding:12px 18px;border-radius:8px;}
-.pm-file-btn input[type=file]{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:0;}
+  <!-- ============ PERFORMANCE ============ -->
+  <section class="view" id="view-performance">
+    <div class="page-head"><h2 class="page-title">Employee Performance</h2></div>
+    <div class="search-bar">
+      <select id="perfPeriod">
+        <option value="month">This month</option>
+        <option value="lastmonth">Last month</option>
+        <option value="30">Last 30 days</option>
+        <option value="year">This year</option>
+        <option value="custom">Custom range</option>
+      </select>
+      <input type="date" id="perfFrom" title="From" style="display:none;">
+      <input type="date" id="perfTo" title="To" style="display:none;">
+      <select id="perfDiscipline"><option value="">All disciplines</option><option>Electrical</option><option>Mechanical</option></select>
+          </div>
+    <div class="stat-row">
+      <div class="mini-stat"><div class="mini-value" id="perfJobs">0</div><div class="mini-label">Jobs (person-jobs)</div></div>
+      <div class="mini-stat"><div class="mini-value" id="perfHours">0</div><div class="mini-label">Hours on jobs</div></div>
+      <div class="mini-stat"><div class="mini-value" id="perfPeople">0</div><div class="mini-label">People active</div></div>
+      <div class="mini-stat"><div class="mini-value" id="perfCoverage">0%</div><div class="mini-label">Logs with names</div></div>
+    </div>
+    <div class="perf-disc-row" id="perfDisciplines"></div>
+    <div class="chart-panel"><h3>Jobs per person</h3><div class="chart-box" id="perfChartBox"><canvas id="perfChart"></canvas></div></div>
+    <div class="panel-block">
+      <h3>Per person</h3>
+      <div class="table-scroll" id="perfTable"></div>
+      <div class="label-note" style="margin-top:10px;">Hours are the logged job time credited in full to everyone on the job (not split). Repair time is the average duration of completed breakdown jobs. Completion is the share of a person's jobs marked Completed or Reviewed. Logs with no names selected (older logs) are not counted.</div>
+    </div>
+  </section>
 
-/* PM chart */
-.pmc-legend{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;font-size:12px;margin:8px 0;}
-.pmc-key{display:inline-block;min-width:22px;text-align:center;padding:2px 5px;border-radius:4px;font-weight:700;margin-right:3px;}
-.pmc-wrap{overflow:auto;max-height:70vh;border:1px solid #d6dde8;border-radius:8px;background:#fff;}
-.pmc-table{border-collapse:separate;border-spacing:0;font-size:11px;}
-.pmc-table th,.pmc-table td{border-right:1px solid #eef1f6;border-bottom:1px solid #eef1f6;}
-.pmc-table thead th{position:sticky;top:0;background:#0B2545;color:#fff;z-index:3;padding:3px 2px;font-weight:600;}
-.pmc-table thead tr:nth-child(2) th{top:22px;font-size:9px;font-weight:500;}
-.pmc-name{position:sticky;left:0;background:#fff;z-index:2;min-width:150px;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:3px 6px;text-align:left;}
-thead .pmc-name{background:#0B2545;z-index:4;}
-.pmc-mon{border-left:1px solid #324a6d;}
-.pmc{min-width:24px;height:22px;text-align:center;padding:0;}
-.pmc-c{font-weight:700;font-size:10px;cursor:pointer;}
-.pmc-now{box-shadow:inset 0 0 0 1px #E8A200;}
-.pmc-grp td{background:#eef2f8;font-weight:700;padding:3px 8px;position:sticky;left:0;}
-.pmc-W{background:#DDEBF7;color:#1F4E78;} .pmc-M{background:#BDD7EE;color:#1F4E78;} .pmc-Q{background:#C6E0B4;color:#375623;}
-.pmc-H{background:#FFE699;color:#7F6000;} .pmc-A{background:#F4B183;color:#833C0B;} .pmc-S{background:#D9C3E8;color:#5B2C83;}
-.pmc-dn{background:#C6EFCE;color:#006100;} .pmc-od{background:#FFC7CE;color:#9C0006;}
-.pmc-detail{background:#fff8e1;border:1px solid #f0d27a;border-radius:8px;padding:8px 12px;margin:8px 0;font-size:13px;}
+  <!-- ============ ADMIN ============ -->
+  <section class="view" id="view-admin">
+    <div class="page-head">
+      <h2 class="page-title">Admin &mdash; User Accounts</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn-ghost" onclick="openOrgBranding()">Organization Branding</button>
+        <button class="btn-ghost" onclick="openCustomRoles()">Custom Roles</button>
+        <button class="btn-primary" onclick="openUserForm()">+ Add User</button>
+      </div>
+    </div>
+    <div class="hint" style="margin-bottom:18px;">Roles: <b>Technician</b> (submit logs, view everything), <b>Maintenance Supervisor</b> (also manages machines), <b>Management</b> and <b>Maintenance HOD</b> (identical full access - user accounts, branding, everything - just a different title for your org chart). Need something narrower, like read-only access for production staff? See <b>Custom Roles</b> above.</div>
+    <div id="usersList"></div>
+  </section>
 
-.pmc-wd{font-size:9px;font-weight:600;padding:2px 0;min-width:24px;}
-.pmc-we{background-image:linear-gradient(rgba(0,0,0,.06),rgba(0,0,0,.06));}
-.pmc-sum{font-size:10px;font-weight:700;color:#4a5568;background:#f3f6fb;}
-.pmc-table tfoot td{position:sticky;bottom:0;z-index:2;border-top:2px solid #cfd8e6;}
+  <!-- ============ CUSTOM ROLES (Management only) ============ -->
+  <section class="view" id="view-custom-roles">
+    <button class="detail-back" onclick="switchView('admin')">&larr; Back to Admin</button>
+    <div class="page-head">
+      <h2 class="page-title">Custom Roles</h2>
+      <button class="btn-primary" onclick="openCustomRoleForm()">+ New Role</button>
+    </div>
+    <div class="hint" style="margin-bottom:18px;">
+      A custom role is a named set of permissions for needs the 4 built-in roles don't cover
+      &mdash; e.g. a read-only "Production Personnel" role that can only view Reports, Dashboard, and Machines.
+      "Manage Users" and "Manage Branding" are shown for completeness but currently don't grant
+      those specific abilities, to avoid a custom role gaining the power to create admin accounts.
+    </div>
+    <div id="customRolesList"></div>
+    <div class="empty-state" id="customRolesEmpty" style="display:none;">
+      <div class="big">No custom roles yet</div>
+      <div>Create one for any access pattern the 4 built-in roles don't cover.</div>
+    </div>
 
-.pmc-table col.pmc-wecol{background:#ececec;} .pmc-table col.pmc-nowcol{background:#fff3cd;}
-.pmc-year .pmc{min-width:17px;} .pmc-year .pmc-wd,.pmc-year .pmc-wk{min-width:17px;font-size:8px;padding:2px 0;}
-.pmc-year .pmc-c{font-size:8px;}
-.pmc-table tr.pmc-grp td{background:#1F3A5F;color:#fff;border-top:3px solid #0B2545;border-bottom:2px solid #0B2545;font-size:12px;letter-spacing:.04em;text-transform:uppercase;padding:5px 8px;}
-.pmc-table td.pmc-we,.pmc-table th.pmc-we{background-image:none;}
-.pmc-table th.pmc-we{background:#3b5b8a;}
-.pmc-gl{position:sticky;left:8px;display:inline-block;}
-.pmc-table tr.pmc-grp td{position:static;}
-.pm-import{display:block;padding:8px 14px;}
-.pm-import summary{cursor:pointer;}
-.pm-import-body{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:8px;}
-@media (max-width:640px){.pmc-name{min-width:104px;max-width:104px;font-size:10px;}.pmc-table{font-size:10px;}}
-.pmc-table th.pmc-mon{text-align:left;padding-left:8px;}
+    <div class="panel" id="customRoleFormPanel" style="display:none;max-width:520px;margin-top:20px;">
+      <h2 id="customRoleFormTitle">New Custom Role</h2>
+      <form id="customRoleForm">
+        <input type="hidden" id="customRoleId">
+        <label for="customRoleName">Role Name</label>
+        <input id="customRoleName" required placeholder="e.g. Production Personnel">
+        <label style="margin-top:14px;">Permissions</label>
+        <div class="permission-checklist">
+          <label class="permission-check"><input type="checkbox" value="view_dashboard"> View Dashboard</label>
+          <label class="permission-check"><input type="checkbox" value="view_machines"> View Machines</label>
+          <label class="permission-check"><input type="checkbox" value="manage_machines"> Manage Machines (add/edit)</label>
+          <label class="permission-check"><input type="checkbox" value="submit_logs"> Submit Logs</label>
+          <label class="permission-check"><input type="checkbox" value="manage_logs"> Manage Logs (review/edit)</label>
+          <label class="permission-check"><input type="checkbox" value="view_reports"> View Reports</label>
+          <label class="permission-check"><input type="checkbox" value="manage_users"> Manage Users <span class="label-note">(not yet active - see note above)</span></label>
+          <label class="permission-check"><input type="checkbox" value="manage_branding"> Manage Branding <span class="label-note">(not yet active - see note above)</span></label>
+        </div>
+        <div class="form-error" id="customRoleError" style="display:none;"></div>
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" id="customRoleFormSubmit">Create Role</button>
+          <button type="button" class="btn-ghost" onclick="closeCustomRoleForm()">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ============ ORGANIZATION BRANDING (Management only) ============ -->
+  <section class="view" id="view-org-branding">
+    <button class="detail-back" onclick="switchView('admin')">&larr; Back to Admin</button>
+    <div class="panel" style="max-width:560px;">
+      <h2>Organization Branding</h2>
+      <div class="hint">This appears on every generated PDF and Excel report for your organization.</div>
+
+      <label>Logo</label>
+      <div id="logoPreviewBox" class="logo-preview-box">
+        <img id="logoPreviewImg" style="display:none;" alt="Organization logo">
+        <span id="logoPreviewPlaceholder">No logo uploaded</span>
+      </div>
+      <input type="file" id="logoFileInput" accept="image/png,image/jpeg" style="display:none;">
+      <div class="form-actions" style="margin-top:10px;">
+        <button type="button" class="btn-ghost" onclick="document.getElementById('logoFileInput').click()">Upload Logo</button>
+        <button type="button" class="btn-danger" id="removeLogoBtn" onclick="removeOrgLogo()" style="display:none;">Remove Logo</button>
+      </div>
+      <div class="label-note" style="margin-top:6px;">PNG or JPEG, up to 3MB.</div>
+
+      <form id="orgBrandingForm" style="margin-top:22px;">
+        <label for="brandName">Organization Name</label>
+        <input id="brandName" required>
+        <label for="brandTagline">Tagline</label>
+        <input id="brandTagline">
+
+        <h2 style="margin-top:24px;font-size:15px;">Header Display</h2>
+        <div class="hint">Controls how your logo appears in the app's own header (not the PDF/Excel letterhead, which always shows full details). Useful if your logo image already includes your company name and tagline.</div>
+        <div class="radio-group">
+          <label class="radio-option"><input type="radio" name="headerDisplayMode" value="logo_only"> Logo only</label>
+          <label class="radio-option"><input type="radio" name="headerDisplayMode" value="logo_name_tagline" checked> Logo plus company name and tagline</label>
+          <label class="radio-option"><input type="radio" name="headerDisplayMode" value="logo_tagline"> Logo and tagline</label>
+        </div>
+        <label style="margin-top:14px;">Live Preview</label>
+        <div class="header-preview-box">
+          <div class="header-preview-inner">
+            <img id="previewLogoImg" class="header-preview-logo" style="display:none;" alt="">
+            <span id="previewBrandIcon" class="brand-icon">&#9881;&#65039;</span>
+            <div>
+              <div id="previewTitle" class="header-preview-title">STEELWORKS CMMS</div>
+              <div id="previewSubtitle" class="header-preview-subtitle">MAINTENANCE LOG &amp; WORK ORDER SYSTEM</div>
+              <span class="cmms-badge" id="previewCmmsBadge" style="display:none;">CMMS</span>
+            </div>
+          </div>
+        </div>
+
+        <label for="brandApprovedBy">Approved By <span class="label-note">(e.g. HOD)</span></label>
+        <input id="brandApprovedBy">
+
+        <h2 style="margin-top:24px;font-size:15px;">Maintenance Log PDF Document Control</h2>
+        <div class="row2">
+          <div><label for="brandDocNoLog">Document No.</label><input id="brandDocNoLog" placeholder="e.g. ZSF/MMCD/BRF/01"></div>
+          <div><label for="brandDocRevLog">Rev</label><input id="brandDocRevLog" placeholder="e.g. 01"></div>
+        </div>
+        <div class="row2">
+          <div><label for="brandDocEffectiveDateLog">Effective Date</label><input id="brandDocEffectiveDateLog" placeholder="e.g. 12/11/2025"></div>
+          <div><label for="brandDocIssueLog">Issue</label><input id="brandDocIssueLog" placeholder="e.g. 02"></div>
+        </div>
+
+        <h2 style="margin-top:24px;font-size:15px;">Excel Export Document Control</h2>
+        <div class="row2">
+          <div><label for="brandDocNoExcel">Document No.</label><input id="brandDocNoExcel" placeholder="e.g. ZSF/MCMD/ML/01"></div>
+          <div><label for="brandDocRevExcel">Rev</label><input id="brandDocRevExcel" placeholder="e.g. 01"></div>
+        </div>
+        <label for="brandDocEffectiveDateExcel">Effective Date</label>
+        <input id="brandDocEffectiveDateExcel" placeholder="e.g. 10/12/2025">
+
+        <div class="form-actions">
+          <button type="submit" class="btn-primary">Save Branding</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- ============ USER FORM (add/edit) ============ -->
+  <section class="view" id="view-user-form">
+    <button class="detail-back" onclick="switchView('admin')">&larr; Back to Admin</button>
+    <div class="panel">
+      <h2 id="userFormTitle">Add User</h2>
+      <form id="userForm">
+        <input type="hidden" id="userFormId">
+        <label for="uName">Full Name</label>
+        <input id="uName" required placeholder="e.g. Grace Mwangi">
+        <label for="uUsername">Username</label>
+        <input id="uUsername" required placeholder="e.g. gmwangi" autocomplete="off">
+        <label for="uPassword">Password <span class="label-note" id="uPasswordNote"></span></label>
+        <input id="uPassword" type="password" autocomplete="new-password">
+        <label for="uRole">Role</label>
+        <select id="uRole">
+          <option>Technician</option>
+          <option>Maintenance Supervisor</option>
+          <option>Management</option>
+          <option>Maintenance HOD</option>
+        </select>
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" id="userFormSubmit">Add User</button>
+          <button type="button" class="btn-ghost" onclick="switchView('admin')">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <button id="backToTopBtn" class="back-to-top" onclick="window.scrollTo({top:0,behavior:'smooth'})" aria-label="Back to top" style="display:none;">&#8593;</button>
+
+</div>
+</div>
+<!-- ============ NOTIFICATIONS PANEL ============ -->
+<div class="notif-panel" id="notifPanel" style="display:none;">
+  <div class="notif-head"><strong>Notifications</strong><button type="button" class="btn-ghost" onclick="markAllNotifsRead()">Mark all read</button></div>
+  <div id="notifList"><div class="notif-empty">Loading&hellip;</div></div>
+</div>
+<!-- ============ REPORT BREAKDOWN (quick) ============ -->
+<div class="dt-overlay" id="downtimeOverlay" style="display:none;" onclick="if(event.target===this)closeDowntimeForm()">
+  <form class="dt-card" id="downtimeForm" autocomplete="off">
+    <h3>Report Breakdown</h3>
+    <p class="dt-hint">Machine just stopped? Report it now &mdash; the supervisors are alerted straight away and the repair details can be added later.</p>
+    <label for="dtMachine">Machine</label>
+    <input id="dtMachine" autocomplete="off" placeholder="Type a machine name or code..." required>
+    <label for="dtSymptom">What happened?</label>
+    <textarea id="dtSymptom" rows="3" placeholder="e.g. Hydraulic oil leaking at the stripper lock" required></textarea>
+    <div class="dt-row">
+      <div><label for="dtReportedBy">Reported by</label><input id="dtReportedBy" placeholder="Operator / supervisor"></div>
+      <div><label for="dtPriority">Priority</label><select id="dtPriority"><option>High</option><option selected>Medium</option><option>Low</option></select></div>
+    </div>
+    <label for="dtPhotos">Photo <span class="label-note">(optional &mdash; up to 3)</span></label>
+    <input type="file" id="dtPhotos" accept="image/*" multiple>
+    <div class="dt-row">
+      <div><label for="dtDate">Stopped on</label><input type="date" id="dtDate"></div>
+      <div><label for="dtTime">At</label><input type="time" id="dtTime"></div>
+    </div>
+    <div class="dt-error" id="dtError" style="display:none;"></div>
+    <div class="dt-actions">
+      <button type="submit" class="btn-alert" id="dtSubmit">Report Breakdown</button>
+      <button type="button" class="btn-ghost" onclick="closeDowntimeForm()">Cancel</button>
+    </div>
+  </form>
+</div>
+<script src="/app.js"></script>
+<script src="/kanban.js"></script>
+<script src="/pmschedule.js"></script>
+</body>
+</html>
