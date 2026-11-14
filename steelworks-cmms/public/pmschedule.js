@@ -261,6 +261,7 @@
     }
     renderChart();
   }
+  const GROUP_NAMES = { W: 'Weekly', M: 'Monthly', Q: 'Quarterly', H: 'Half-yearly', A: 'Annual', S: 'Shutdown' };
   function renderChart() {
     const d = chartData; if (!d) return;
     if (!d.machines.length) {
@@ -270,125 +271,70 @@
     const q = $('pmChSearch').value.trim().toLowerCase();
     const hideW = $('pmChLevel').value === 'nw';
     const td = d.today;
-    if ($('pmChView').value === 'day') return renderMonth(d, q, hideW, td);
-    const jan1 = new Date(d.year + '-01-01T00:00:00Z');
-    const first = new Date(jan1.getTime() - ((jan1.getUTCDay() + 6) % 7) * 86400000);
-    const nW = Math.floor((new Date(d.year + '-12-31T00:00:00Z') - first) / 86400000 / 7) + 1;
-    const weekStart = w => new Date(first.getTime() + w * 7 * 86400000);
-    const curW = td.slice(0, 4) === String(d.year) ? Math.floor((new Date(td + 'T00:00:00Z') - first) / 86400000 / 7) : -1;
-    // month header cells
-    let mh = '<th class="pmc-name" rowspan="2">Machine</th>', run = 0, lastM = -1;
-    const spans = [];
-    for (let w = 0; w < nW; w++) {
-      const ds = weekStart(w), m = ds.getUTCFullYear() === d.year ? ds.getUTCMonth() : (ds.getUTCFullYear() < d.year ? 0 : 11);
-      if (m !== lastM) { spans.push({ m, n: 1 }); lastM = m; } else spans[spans.length - 1].n++;
+    const wholeYear = $('pmChView').value === 'year';
+    const mo0 = wholeYear ? 0 : parseInt($('pmChMonth').value, 10) - 1, mo1 = wholeYear ? 11 : mo0;
+    const start = Date.UTC(d.year, mo0, 1), end = Date.UTC(d.year, mo1 + 1, 0);
+    const nD = Math.round((end - start) / 86400000) + 1;
+    const WD = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    const isoOf = n => new Date(start + n * 86400000).toISOString().slice(0, 10);
+    const dayIdx = iso => Math.round((Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - start) / 86400000);
+    // columns: weekend shading and today's outline come from <col> so empty gaps can be merged into one cell
+    let cols = '<col class="pmc-c0">', hMon = '<th class="pmc-name" rowspan="3">Machine</th>', hWd = '', hDay = '', mSpan = [];
+    for (let n = 0; n < nD; n++) {
+      const dt = new Date(start + n * 86400000), wd = dt.getUTCDay(), iso = isoOf(n);
+      cols += `<col class="${(wd === 0 || wd === 6 ? 'pmc-wecol ' : '') + (iso === td ? 'pmc-nowcol' : '')}">`;
+      const cl = (wd === 0 || wd === 6 ? ' pmc-we' : '') + (iso === td ? ' pmc-now' : '');
+      hWd += `<th class="pmc-wd${cl}">${WD[wd]}</th>`;
+      hDay += `<th class="pmc-wk${cl}">${dt.getUTCDate()}</th>`;
+      const mm = dt.getUTCMonth();
+      if (!mSpan.length || mSpan[mSpan.length - 1].m !== mm) mSpan.push({ m: mm, n: 1 }); else mSpan[mSpan.length - 1].n++;
     }
-    mh += spans.map(s => `<th colspan="${s.n}" class="pmc-mon">${MON[s.m]}</th>`).join('');
-    let wh = '';
-    for (let w = 0; w < nW; w++) wh += `<th class="pmc-wk${w === curW ? ' pmc-now' : ''}">${weekStart(w).getUTCDate()}</th>`;
+    hMon += mSpan.map(s => `<th colspan="${s.n}" class="pmc-mon">${MON[s.m]}</th>`).join('');
     let body = '', shown = 0, lastG = null;
+    const perDay = new Array(nD).fill(0);
     d.machines.forEach((m, mi) => {
       if (q && !(m.name + ' ' + m.code).toLowerCase().includes(q)) return;
-      const wk = {};
+      const days = {};
       m.v.forEach(v => {
         if (hideW && v[2] === 'W') return;
-        const w = Math.floor((new Date(v[1] + 'T00:00:00Z') - first) / 86400000 / 7);
-        (wk[w] = wk[w] || []).push(v);
+        const n = dayIdx(v[1]); if (n < 0 || n >= nD) return;
+        (days[n] = days[n] || []).push(v);
       });
-      if (m.group !== lastG) { body += `<tr class="pmc-grp"><td colspan="${nW + 1}">${esc(m.group)}</td></tr>`; lastG = m.group; }
-      let tds = '';
-      for (let w = 0; w < nW; w++) {
-        const l = wk[w];
-        if (!l) { tds += `<td class="pmc${w === curW ? ' pmc-now' : ''}"></td>`; continue; }
-        l.sort((a, b) => RANK[b[2]] - RANK[a[2]]);
-        const open = l.filter(x => x[3] === 'Planned' || x[3] === 'In progress');
-        const od = open.some(x => x[1] < td), dn = l.every(x => x[3] === 'Done' || x[3] === 'Skipped');
-        tds += `<td class="pmc pmc-c pmc-${l[0][2]}${od ? ' pmc-od' : dn ? ' pmc-dn' : ''}" data-pmcell="${mi}:${w}">${l.map(x => x[2]).join('')}</td>`;
-      }
-      body += `<tr><td class="pmc-name"><b>${esc(m.code)}</b> ${esc(m.name)}</td>${tds}</tr>`;
-      shown++;
-    });
-    d._first = first;
-    $('pmChart').innerHTML = `
-      <div class="pmc-legend">${['W', 'M', 'Q', 'H', 'A', 'S'].map(k => `<span class="pmc-key pmc-${k}">${k}</span>${esc({ W: 'Weekly', M: 'Monthly', Q: 'Quarterly', H: 'Half-yearly', A: 'Annual', S: 'Shutdown' }[k])}`).join(' ')}
-        <span class="pmc-key pmc-dn">&#10003;</span>Done <span class="pmc-key pmc-od">!</span>Overdue</div>
-      <div id="pmChDetail" class="pmc-detail" style="display:none;"></div>
-      ${shown ? `<div class="pmc-wrap"><table class="pmc-table"><thead><tr>${mh}</tr><tr>${wh}</tr></thead><tbody>${body}</tbody></table></div>` : '<div class="empty-state"><div class="big">No machines match</div></div>'}`;
-  }
-
-  // month view: every day of the month as a column
-  function renderMonth(d, q, hideW, td) {
-    const mo = parseInt($('pmChMonth').value, 10) - 1;
-    const ys = String(d.year), ms = ys + '-' + String(mo + 1).padStart(2, '0');
-    const nDays = new Date(Date.UTC(d.year, mo + 1, 0)).getUTCDate();
-    const WD = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-    let h1 = '<th class="pmc-name" rowspan="2">Machine</th>', h2 = '';
-    for (let n = 1; n <= nDays; n++) {
-      const iso = ms + '-' + String(n).padStart(2, '0');
-      const wd = new Date(iso + 'T00:00:00Z').getUTCDay();
-      const cl = (wd === 0 || wd === 6 ? ' pmc-we' : '') + (iso === td ? ' pmc-now' : '');
-      h1 += `<th class="pmc-wd${cl}">${WD[wd]}</th>`;
-      h2 += `<th class="pmc-wk${cl}">${n}</th>`;
-    }
-    let body = '', shown = 0, lastG = null, perDay = new Array(nDays + 1).fill(0);
-    d.machines.forEach((m, mi) => {
-      if (q && !(m.name + ' ' + m.code).toLowerCase().includes(q)) return;
-      const day = {};
-      m.v.forEach(v => {
-        if (v[1].slice(0, 7) !== ms || (hideW && v[2] === 'W')) return;
-        (day[parseInt(v[1].slice(8), 10)] = day[parseInt(v[1].slice(8), 10)] || []).push(v);
-      });
-      if (!Object.keys(day).length) return;
-      if (m.group !== lastG) { body += `<tr class="pmc-grp"><td colspan="${nDays + 1}">${esc(m.group)}</td></tr>`; lastG = m.group; }
-      let tds = '';
-      for (let n = 1; n <= nDays; n++) {
-        const iso = ms + '-' + String(n).padStart(2, '0');
-        const wd = new Date(iso + 'T00:00:00Z').getUTCDay();
-        const l = day[n], base = 'pmc' + (wd === 0 || wd === 6 ? ' pmc-we' : '') + (iso === td ? ' pmc-now' : '');
-        if (!l) { tds += `<td class="${base}"></td>`; continue; }
+      if (!Object.keys(days).length) return;
+      if (m.group !== lastG) { body += `<tr class="pmc-grp"><td colspan="${nD + 1}"><span class="pmc-gl">${esc(m.group)}</span></td></tr>`; lastG = m.group; }
+      let tds = '', gap = 0;
+      for (let n = 0; n < nD; n++) {
+        const l = days[n];
+        if (!l) { gap++; continue; }
+        if (gap) { tds += `<td class="pmc" colspan="${gap}"></td>`; gap = 0; }
         perDay[n]++;
         l.sort((a, b) => RANK[b[2]] - RANK[a[2]]);
         const od = l.some(x => (x[3] === 'Planned' || x[3] === 'In progress') && x[1] < td), dn = l.every(x => x[3] === 'Done' || x[3] === 'Skipped');
-        tds += `<td class="${base} pmc-c pmc-${l[0][2]}${od ? ' pmc-od' : dn ? ' pmc-dn' : ''}" data-pmday="${mi}:${n}">${l.map(x => x[2]).join('')}</td>`;
+        tds += `<td class="pmc pmc-c pmc-${l[0][2]}${od ? ' pmc-od' : dn ? ' pmc-dn' : ''}" data-pmday="${mi}:${l[0][1]}">${l.map(x => x[2]).join('')}</td>`;
       }
+      if (gap) tds += `<td class="pmc" colspan="${gap}"></td>`;
       body += `<tr><td class="pmc-name"><b>${esc(m.code)}</b> ${esc(m.name)}</td>${tds}</tr>`;
       shown++;
     });
     let foot = '<td class="pmc-name"><b>Machines that day</b></td>';
-    for (let n = 1; n <= nDays; n++) foot += `<td class="pmc pmc-sum">${perDay[n] || ''}</td>`;
+    for (let n = 0; n < nD; n++) foot += `<td class="pmc pmc-sum">${perDay[n] || ''}</td>`;
     $('pmChart').innerHTML = `
-      <div class="pmc-legend">${['W', 'M', 'Q', 'H', 'A', 'S'].map(k => `<span class="pmc-key pmc-${k}">${k}</span>${esc({ W: 'Weekly', M: 'Monthly', Q: 'Quarterly', H: 'Half-yearly', A: 'Annual', S: 'Shutdown' }[k])}`).join(' ')}
+      <div class="pmc-legend">${['W', 'M', 'Q', 'H', 'A', 'S'].map(k => `<span class="pmc-key pmc-${k}">${k}</span>${esc(GROUP_NAMES[k])}`).join(' ')}
         <span class="pmc-key pmc-dn">&#10003;</span>Done <span class="pmc-key pmc-od">!</span>Overdue</div>
       <div id="pmChDetail" class="pmc-detail" style="display:none;"></div>
-      ${shown ? `<div class="pmc-wrap"><table class="pmc-table"><thead><tr>${h1}</tr><tr>${h2}</tr></thead><tbody>${body}</tbody><tfoot><tr>${foot}</tr></tfoot></table></div>` : '<div class="empty-state"><div class="big">No PM visits this month</div></div>'}`;
+      ${shown ? `<div class="pmc-wrap"><table class="pmc-table${wholeYear ? ' pmc-year' : ''}"><colgroup>${cols}</colgroup><thead><tr>${hMon}</tr><tr>${hWd}</tr><tr>${hDay}</tr></thead><tbody>${body}</tbody><tfoot><tr>${foot}</tr></tfoot></table></div>` : '<div class="empty-state"><div class="big">No PM visits in this period</div></div>'}`;
   }
   document.addEventListener('click', (e) => {
     const c = e.target.closest('[data-pmday]');
     if (!c || !chartData) return;
-    const [mi, n] = c.dataset.pmday.split(':').map(Number);
-    const m = chartData.machines[mi];
-    const iso = chartData.year + '-' + String(parseInt($('pmChMonth').value, 10)).padStart(2, '0') + '-' + String(n).padStart(2, '0');
+    const [mi, iso] = c.dataset.pmday.split(':');
+    const m = chartData.machines[+mi];
     const names = { W: 'Weekly', M: 'Monthly', Q: 'Quarterly', H: 'Half-yearly', A: 'Annual', S: 'Annual (shutdown)' };
     const box = $('pmChDetail');
     box.innerHTML = `<b>${esc(m.code)} ${esc(m.name)}</b> <span class="hint" style="margin:0;">${esc(m.group)} &middot; ${esc(fmt(iso))}</span>` +
       m.v.filter(v => v[1] === iso).map(v => `<div>${esc(names[v[2]] || v[2])} &middot; <b>${esc(v[3] === 'Planned' && v[1] < chartData.today ? 'Overdue' : v[3])}</b></div>`).join('') +
       '<div class="hint" style="margin:4px 0 0;">To log a visit, open it from the Due tab.</div>';
     box.style.display = ''; box.scrollIntoView({ block: 'nearest' });
-  });
-  document.addEventListener('click', (e) => {
-    const c = e.target.closest('[data-pmcell]');
-    if (!c || !chartData) return;
-    const [mi, w] = c.dataset.pmcell.split(':').map(Number);
-    const m = chartData.machines[mi];
-    const ws = chartData._first.getTime() + w * 7 * 86400000;
-    const list = m.v.filter(v => Math.floor((new Date(v[1] + 'T00:00:00Z').getTime() - chartData._first.getTime()) / 86400000 / 7) === w);
-    const names = { W: 'Weekly', M: 'Monthly', Q: 'Quarterly', H: 'Half-yearly', A: 'Annual', S: 'Annual (shutdown)' };
-    const box = $('pmChDetail');
-    box.innerHTML = `<b>${esc(m.code)} ${esc(m.name)}</b> <span class="hint" style="margin:0;">${esc(m.group)}</span>` +
-      list.map(v => `<div>${esc(fmt(v[1]))} &middot; ${esc(names[v[2]] || v[2])} &middot; <b>${esc(v[3] === 'Planned' && v[1] < chartData.today ? 'Overdue' : v[3])}</b></div>`).join('') +
-      '<div class="hint" style="margin:4px 0 0;">To log a visit, open it from the Due tab.</div>';
-    box.style.display = '';
-    box.scrollIntoView({ block: 'nearest' });
   });
   function downloadXlsx() {
     const y = (chartData && chartData.year) || '';
@@ -472,7 +418,7 @@
     if (t.id === 'pmPeriod') loadSummary();
     if (t.id === 'pmChYear' || t.id === 'pmChGroup') loadChart(true);
     if (t.id === 'pmChLevel' || t.id === 'pmChMonth') renderChart();
-    if (t.id === 'pmChView') { $('pmChMonth').style.display = t.value === 'day' ? '' : 'none'; renderChart(); }
+    if (t.id === 'pmChView') { $('pmChMonth').style.display = t.value === 'month' ? '' : 'none'; renderChart(); }
     if (t.id === 'pmShutYear') { shutOpen = {}; loadShutdown(); }
   });
   let deb;
