@@ -826,4 +826,7 @@ button.is-busy::after{content:'';display:inline-block;width:11px;height:11px;mar
 @media (max-width:640px){
   .pm-card-top{flex-wrap:wrap;} .pm-card-side{flex-direction:row;align-items:center;width:100%;justify-content:flex-start;margin-left:42px;}
   .pm-actions .btn-primary,.pm-actions .btn-ghost{flex:1 1 auto;}
-      }
+}
+
+.pm-import{display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:#fff8e6;border:1px solid #f0d79a;border-radius:8px;padding:10px 14px;margin-bottom:14px;}
+.pm-import select,.pm-import input[type=file]{font-size:13px;}
