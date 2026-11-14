@@ -264,6 +264,9 @@ module.exports = function (app, h) {
       else if (scope === 'today') { where.push(`p.due_date = ${P(td)}::date`); }
       else if (scope === 'week') { where.push(`p.due_date BETWEEN ${P(td)}::date AND ${P(addDaysStr(td, 6))}::date`); }
       else if (scope === 'month') { where.push(`p.due_date BETWEEN ${P(td)}::date AND ${P(addDaysStr(td, 30))}::date`); }
+      else if (scope === 'quarter') { where.push(`p.due_date BETWEEN ${P(td)}::date AND ${P(addDaysStr(td, 90))}::date`); }
+      else if (scope === 'year') { where.push(`p.due_date BETWEEN ${P(td)}::date AND ${P(td.slice(0, 4) + '-12-31')}::date`); }
+      else if (scope === 'upcoming') { where.push(`p.due_date >= ${P(td)}::date`); }
       else if (scope === 'range') {
         if (isDate(req.query.from)) where.push(`p.due_date >= ${P(req.query.from)}::date`);
         if (isDate(req.query.to)) where.push(`p.due_date <= ${P(req.query.to)}::date`);
