@@ -786,6 +786,7 @@
         <button type="button" data-pmtab="due" class="active">Due</button>
         <button type="button" data-pmtab="compliance">Compliance</button>
         <button type="button" data-pmtab="shutdown">Shutdown</button>
+        <button type="button" data-pmtab="chart">Chart</button>
       </div>
     </div>
 
@@ -827,13 +828,26 @@
           <option value="90">Last 90 days</option>
           <option value="year">This year</option>
         </select>
+        <button type="button" class="btn-ghost" data-pmact="xlsx">Download Excel</button>
       </div>
       <div id="pmSummary"></div>
+    </div>
+
+    <div id="pmTabChart" style="display:none;">
+      <div class="search-bar pm-filters">
+        <select id="pmChYear"></select>
+        <select id="pmChGroup"><option value="">All groups</option></select>
+        <select id="pmChLevel"><option value="">All levels</option><option value="nw">Hide weekly</option></select>
+        <input type="search" id="pmChSearch" placeholder="Search machine name or code">
+        <button type="button" class="btn-primary" data-pmact="xlsx">Download Excel</button>
+      </div>
+      <div id="pmChart"></div>
     </div>
 
     <div id="pmTabShutdown" style="display:none;">
       <div class="search-bar pm-filters">
         <select id="pmShutYear"></select>
+        <button type="button" class="btn-ghost" data-pmact="xlsx">Download Excel</button>
         <span class="hint" style="margin:0;">Annual service for the machines in the plant shutdown. Tick each machine when its day's work is done.</span>
       </div>
       <div id="pmShutdown"></div>
