@@ -1260,6 +1260,7 @@ app.use('/api/kanban', async (req, res, next) => {
   } catch (e) { res.status(500).json({ error: 'Could not check Boards access' }); }
 });
 require('./kanban')(app, { dbGet, dbAll, dbRun, genId, nowISO, multer, FULL_ADMIN_ROLES, withTransaction });
+require('./pm')(app, { dbGet, dbAll, dbRun, withTransaction, requirePermission, requireAnyPermission });
 
 // ================= ORGANIZATION BRANDING (own org only) =================
 
@@ -2077,8 +2078,11 @@ app.post('/api/logs', requirePermission('submit_logs'), async (req, res) => {
         const newStatus = status === 'Completed' ? 'Running' : 'Down';
         await client.query('UPDATE machines SET status = $1 WHERE id = $2', [newStatus, machineId]);
       } else if (logType === 'Preventive' && status === 'Completed') {
-        const nextPm = addDays(todayISO(), 30);
+        const nextPm = (await app.locals.pm.nextPlannedDate(client, machineId)) || addDays(todayISO(), 30);
         await client.query('UPDATE machines SET status = $1, next_pm_date = $2 WHERE id = $3', ['Running', nextPm, machineId]);
+      }
+      if (req.body.pmId && logType === 'Preventive') {
+        await app.locals.pm.linkLog(client, orgId, req.body.pmId, machineId, log.id, status, req.session.user.name || req.session.user.username);
       }
     });
 
@@ -2256,6 +2260,8 @@ app.put('/api/logs/:id', requirePermission('manage_logs'), async (req, res) => {
       } catch (nerr) { console.error('notify failed:', nerr.message); }
     }
 
+    try { await app.locals.pm.syncFromLog(req.params.id, updated.status); } catch (pmErr) { console.error('pm sync failed:', pmErr.message); }
+
     if (newStaffRows !== null) {
       await dbRun('DELETE FROM log_staff WHERE log_id = $1', [req.params.id]);
       for (const s of newStaffRows) {
@@ -2374,6 +2380,7 @@ app.delete('/api/logs/:id', requirePermission('manage_logs'), requirePasswordCon
     // Attachments reference the log via a foreign key - delete them first
     // so the log itself isn't blocked from deletion by that reference.
     await dbRun('DELETE FROM attachments WHERE log_id = $1', [req.params.id]);
+    try { await dbRun("UPDATE pm_schedule SET status = 'Planned', log_id = NULL, done_at = NULL, done_by = NULL WHERE log_id = $1", [req.params.id]); } catch (pmErr) { /* pm table optional */ }
     await dbRun('DELETE FROM logs WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: 'Could not delete log: ' + e.message }); }
@@ -3197,6 +3204,7 @@ app.get('*', (req, res) => {
 // that could do this at plain module-load time).
 async function start() {
   await db.ensureSchema();
+  await app.locals.pm.ensureSchema();
   await bootstrapDefaultOrganization();
   await bootstrapOrgAdmin();
   await bootstrapSuperAdmin();
