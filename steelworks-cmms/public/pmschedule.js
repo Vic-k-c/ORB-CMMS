@@ -256,6 +256,7 @@
       catch (e) { if (my === chartSeq) $('pmChart').innerHTML = `<div class="empty-state"><div class="big">Could not load chart</div><div>${esc(e.message)}</div></div>`; return; }
       if (my !== chartSeq) return;
       chartData = d;
+      if (!$('pmChMonth').dataset.set) { $('pmChMonth').value = String(parseInt(d.today.slice(5, 7), 10)); $('pmChMonth').dataset.set = '1'; }
       if (d.years && d.years.length) $('pmChYear').innerHTML = d.years.map(v => `<option value="${v}" ${v === d.year ? 'selected' : ''}>${v}</option>`).join('');
     }
     renderChart();
@@ -269,6 +270,7 @@
     const q = $('pmChSearch').value.trim().toLowerCase();
     const hideW = $('pmChLevel').value === 'nw';
     const td = d.today;
+    if ($('pmChView').value === 'day') return renderMonth(d, q, hideW, td);
     const jan1 = new Date(d.year + '-01-01T00:00:00Z');
     const first = new Date(jan1.getTime() - ((jan1.getUTCDay() + 6) % 7) * 86400000);
     const nW = Math.floor((new Date(d.year + '-12-31T00:00:00Z') - first) / 86400000 / 7) + 1;
@@ -313,6 +315,66 @@
       <div id="pmChDetail" class="pmc-detail" style="display:none;"></div>
       ${shown ? `<div class="pmc-wrap"><table class="pmc-table"><thead><tr>${mh}</tr><tr>${wh}</tr></thead><tbody>${body}</tbody></table></div>` : '<div class="empty-state"><div class="big">No machines match</div></div>'}`;
   }
+
+  // month view: every day of the month as a column
+  function renderMonth(d, q, hideW, td) {
+    const mo = parseInt($('pmChMonth').value, 10) - 1;
+    const ys = String(d.year), ms = ys + '-' + String(mo + 1).padStart(2, '0');
+    const nDays = new Date(Date.UTC(d.year, mo + 1, 0)).getUTCDate();
+    const WD = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    let h1 = '<th class="pmc-name" rowspan="2">Machine</th>', h2 = '';
+    for (let n = 1; n <= nDays; n++) {
+      const iso = ms + '-' + String(n).padStart(2, '0');
+      const wd = new Date(iso + 'T00:00:00Z').getUTCDay();
+      const cl = (wd === 0 || wd === 6 ? ' pmc-we' : '') + (iso === td ? ' pmc-now' : '');
+      h1 += `<th class="pmc-wd${cl}">${WD[wd]}</th>`;
+      h2 += `<th class="pmc-wk${cl}">${n}</th>`;
+    }
+    let body = '', shown = 0, lastG = null, perDay = new Array(nDays + 1).fill(0);
+    d.machines.forEach((m, mi) => {
+      if (q && !(m.name + ' ' + m.code).toLowerCase().includes(q)) return;
+      const day = {};
+      m.v.forEach(v => {
+        if (v[1].slice(0, 7) !== ms || (hideW && v[2] === 'W')) return;
+        (day[parseInt(v[1].slice(8), 10)] = day[parseInt(v[1].slice(8), 10)] || []).push(v);
+      });
+      if (!Object.keys(day).length) return;
+      if (m.group !== lastG) { body += `<tr class="pmc-grp"><td colspan="${nDays + 1}">${esc(m.group)}</td></tr>`; lastG = m.group; }
+      let tds = '';
+      for (let n = 1; n <= nDays; n++) {
+        const iso = ms + '-' + String(n).padStart(2, '0');
+        const wd = new Date(iso + 'T00:00:00Z').getUTCDay();
+        const l = day[n], base = 'pmc' + (wd === 0 || wd === 6 ? ' pmc-we' : '') + (iso === td ? ' pmc-now' : '');
+        if (!l) { tds += `<td class="${base}"></td>`; continue; }
+        perDay[n]++;
+        l.sort((a, b) => RANK[b[2]] - RANK[a[2]]);
+        const od = l.some(x => (x[3] === 'Planned' || x[3] === 'In progress') && x[1] < td), dn = l.every(x => x[3] === 'Done' || x[3] === 'Skipped');
+        tds += `<td class="${base} pmc-c pmc-${l[0][2]}${od ? ' pmc-od' : dn ? ' pmc-dn' : ''}" data-pmday="${mi}:${n}">${l.map(x => x[2]).join('')}</td>`;
+      }
+      body += `<tr><td class="pmc-name"><b>${esc(m.code)}</b> ${esc(m.name)}</td>${tds}</tr>`;
+      shown++;
+    });
+    let foot = '<td class="pmc-name"><b>Machines that day</b></td>';
+    for (let n = 1; n <= nDays; n++) foot += `<td class="pmc pmc-sum">${perDay[n] || ''}</td>`;
+    $('pmChart').innerHTML = `
+      <div class="pmc-legend">${['W', 'M', 'Q', 'H', 'A', 'S'].map(k => `<span class="pmc-key pmc-${k}">${k}</span>${esc({ W: 'Weekly', M: 'Monthly', Q: 'Quarterly', H: 'Half-yearly', A: 'Annual', S: 'Shutdown' }[k])}`).join(' ')}
+        <span class="pmc-key pmc-dn">&#10003;</span>Done <span class="pmc-key pmc-od">!</span>Overdue</div>
+      <div id="pmChDetail" class="pmc-detail" style="display:none;"></div>
+      ${shown ? `<div class="pmc-wrap"><table class="pmc-table"><thead><tr>${h1}</tr><tr>${h2}</tr></thead><tbody>${body}</tbody><tfoot><tr>${foot}</tr></tfoot></table></div>` : '<div class="empty-state"><div class="big">No PM visits this month</div></div>'}`;
+  }
+  document.addEventListener('click', (e) => {
+    const c = e.target.closest('[data-pmday]');
+    if (!c || !chartData) return;
+    const [mi, n] = c.dataset.pmday.split(':').map(Number);
+    const m = chartData.machines[mi];
+    const iso = chartData.year + '-' + String(parseInt($('pmChMonth').value, 10)).padStart(2, '0') + '-' + String(n).padStart(2, '0');
+    const names = { W: 'Weekly', M: 'Monthly', Q: 'Quarterly', H: 'Half-yearly', A: 'Annual', S: 'Annual (shutdown)' };
+    const box = $('pmChDetail');
+    box.innerHTML = `<b>${esc(m.code)} ${esc(m.name)}</b> <span class="hint" style="margin:0;">${esc(m.group)} &middot; ${esc(fmt(iso))}</span>` +
+      m.v.filter(v => v[1] === iso).map(v => `<div>${esc(names[v[2]] || v[2])} &middot; <b>${esc(v[3] === 'Planned' && v[1] < chartData.today ? 'Overdue' : v[3])}</b></div>`).join('') +
+      '<div class="hint" style="margin:4px 0 0;">To log a visit, open it from the Due tab.</div>';
+    box.style.display = ''; box.scrollIntoView({ block: 'nearest' });
+  });
   document.addEventListener('click', (e) => {
     const c = e.target.closest('[data-pmcell]');
     if (!c || !chartData) return;
@@ -409,7 +471,8 @@
     if (['pmScope', 'pmGroup', 'pmLevel'].includes(t.id)) loadDue();
     if (t.id === 'pmPeriod') loadSummary();
     if (t.id === 'pmChYear' || t.id === 'pmChGroup') loadChart(true);
-    if (t.id === 'pmChLevel') renderChart();
+    if (t.id === 'pmChLevel' || t.id === 'pmChMonth') renderChart();
+    if (t.id === 'pmChView') { $('pmChMonth').style.display = t.value === 'day' ? '' : 'none'; renderChart(); }
     if (t.id === 'pmShutYear') { shutOpen = {}; loadShutdown(); }
   });
   let deb;
