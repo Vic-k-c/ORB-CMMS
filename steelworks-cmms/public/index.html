@@ -218,6 +218,7 @@
         <button data-view="machines" id="machinesNavBtn">Machines</button>
         <button data-view="logs" id="logsNavBtn">Maintenance Logs</button>
         <button data-view="reports" id="reportsNavBtn">Reports</button>
+        <button data-view="pm" id="pmNavBtn">PM Schedule</button>
         <button data-view="performance" id="performanceNavBtn">Performance</button>
         <button data-view="kanban" id="kanbanNavBtn">Boards</button>
         <button data-view="admin" id="adminNavBtn">Admin</button>
@@ -601,6 +602,7 @@
       <div class="hint" id="logFormHint">Filled in by the technician after attending to a machine.</div>
       <form id="logForm">
         <input type="hidden" id="logFormId">
+        <div class="pm-log-banner" id="pmLogBanner" style="display:none;"></div>
         <label for="logMachineSearch">Machine Name</label>
         <div class="machine-picker">
           <input type="text" id="logMachineSearch" placeholder="Type a machine name or code..." autocomplete="off" required>
@@ -770,6 +772,59 @@
       </form>
     </div>
     <div id="staffList"></div>
+  </section>
+
+  <!-- ============ PM SCHEDULE ============ -->
+  <section class="view" id="view-pm">
+    <div class="page-head">
+      <h2 class="page-title">PM Schedule</h2>
+      <div class="view-toggle" id="pmTabs">
+        <button type="button" data-pmtab="due" class="active">Due</button>
+        <button type="button" data-pmtab="compliance">Compliance</button>
+        <button type="button" data-pmtab="shutdown">Dec Shutdown</button>
+      </div>
+    </div>
+
+    <div id="pmTabDue">
+      <div class="search-bar pm-filters">
+        <select id="pmScope">
+          <option value="overdue">Overdue</option>
+          <option value="today">Due today</option>
+          <option value="week" selected>Next 7 days</option>
+          <option value="month">Next 30 days</option>
+        </select>
+        <select id="pmGroup"><option value="">All groups</option></select>
+        <select id="pmLevel">
+          <option value="">All levels</option>
+          <option value="W">Weekly</option><option value="M">Monthly</option><option value="Q">Quarterly</option>
+          <option value="H">Half-yearly</option><option value="A">Annual</option>
+        </select>
+        <input type="text" id="pmSearch" placeholder="Search machine name or code..." autocomplete="off">
+        <button type="button" class="btn-ghost" id="pmClear">Clear</button>
+        <span class="filter-count" id="pmCount"></span>
+      </div>
+      <div id="pmList"></div>
+    </div>
+
+    <div id="pmTabCompliance" style="display:none;">
+      <div class="search-bar pm-filters">
+        <select id="pmPeriod">
+          <option value="month">This month</option>
+          <option value="lastmonth">Last month</option>
+          <option value="90">Last 90 days</option>
+          <option value="year">This year</option>
+        </select>
+      </div>
+      <div id="pmSummary"></div>
+    </div>
+
+    <div id="pmTabShutdown" style="display:none;">
+      <div class="search-bar pm-filters">
+        <select id="pmShutYear"></select>
+        <span class="hint" style="margin:0;">Annual service for the machines in the December plant shutdown. Tick each machine when its day's work is done.</span>
+      </div>
+      <div id="pmShutdown"></div>
+    </div>
   </section>
 
   <!-- ============ PERFORMANCE ============ -->
@@ -999,5 +1054,6 @@
 </div>
 <script src="/app.js"></script>
 <script src="/kanban.js"></script>
+<script src="/pmschedule.js"></script>
 </body>
-  </html>
+        </html>
