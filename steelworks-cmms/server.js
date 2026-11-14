@@ -1276,7 +1276,7 @@ app.use('/api/kanban', async (req, res, next) => {
   } catch (e) { res.status(500).json({ error: 'Could not check Boards access' }); }
 });
 require('./kanban')(app, { dbGet, dbAll, dbRun, genId, nowISO, multer, FULL_ADMIN_ROLES, withTransaction });
-require('./pm')(app, { dbGet, dbAll, dbRun, withTransaction, requirePermission, requireAnyPermission });
+require('./pm')(app, { dbGet, dbAll, dbRun, withTransaction, requirePermission, requireAnyPermission, letterhead: { addLogo: addLetterheadLogo, brandText: getLetterheadBrandText } });
 
 // ================= ORGANIZATION BRANDING (own org only) =================
 
