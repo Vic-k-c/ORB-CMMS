@@ -790,14 +790,17 @@
       </div>
     </div>
 
-    <div class="pm-import" id="pmImportBox" style="display:none;">
-      <b>Import PM data</b> <span class="hint" style="margin:0;">Choose the PM file prepared for your plant (.json).</span>
-      <select id="pmImportMode">
-        <option value="merge">Add new visits only</option>
-        <option value="replace">Replace upcoming planned visits</option>
-      </select>
-      <input type="file" id="pmImportFile">
-    </div>
+    <details class="pm-import" id="pmImportBox" style="display:none;">
+      <summary><b>Import PM data</b> <span class="hint" style="margin:0;">(managers only - tap to open)</span></summary>
+      <div class="pm-import-body">
+        <span class="hint" style="margin:0;">Choose the PM file prepared for your plant (.json).</span>
+        <select id="pmImportMode">
+          <option value="merge">Add new visits only</option>
+          <option value="replace">Replace upcoming planned visits</option>
+        </select>
+        <input type="file" id="pmImportFile">
+      </div>
+    </details>
 
     <div id="pmTabDue">
       <div class="search-bar pm-filters">
