@@ -408,6 +408,7 @@ async function showAppShell(){
   document.getElementById('logsNavBtn').style.display = (hasPermission('submit_logs') || hasPermission('manage_logs')) ? '' : 'none';
   document.getElementById('reportsNavBtn').style.display = hasPermission('view_reports') ? '' : 'none';
   document.getElementById('performanceNavBtn').style.display = hasPermission('view_reports') ? '' : 'none';
+  { const pb = document.getElementById('pmNavBtn'); if(pb) pb.style.display = hasPermission('view_machines') ? '' : 'none'; }
   document.getElementById('logsStaffBtn').style.display = (isManagement() || currentUser.role==='Maintenance Supervisor') ? '' : 'none';
   document.getElementById('kanbanNavBtn').style.display = (currentUser && currentUser.boardsAccess) ? '' : 'none';
   document.getElementById('dashboardNewLogBtn').style.display = canSubmitLogs() ? '' : 'none';
@@ -684,6 +685,7 @@ function switchView(name){
   if(name==='logs') loadLogsPage();
   if(name==='reports') initReports();
   if(name==='performance') initPerformance();
+  if(name==='pm' && window.loadPmPage) loadPmPage();
   if(name==='staff') loadStaffPage();
   if(name==='admin') loadAdminPage();
   if(name==='kanban' && window.loadKanbanBoards) loadKanbanBoards();
@@ -1982,6 +1984,8 @@ function setMachinePicker(machineId){
 
 async function openLogForm(preselectMachineId){
   editingLogId = null;
+  window._pmLogId = null;
+  { const pb = document.getElementById('pmLogBanner'); if(pb) pb.style.display = 'none'; }
   document.getElementById('logFormDeleteBtn').style.display = 'none';
   await loadMachinesCache();
   document.getElementById('logForm').reset();
@@ -2127,6 +2131,7 @@ document.getElementById('logForm').addEventListener('submit', async (e)=>{
       findings: document.getElementById('logFindings').value.trim(),
       actionsTaken: document.getElementById('logActions').value.trim(),
       partsUsed: document.getElementById('logParts').value.trim(),
+      pmId: (!editingLogId && window._pmLogId) ? window._pmLogId : undefined,
       status: document.getElementById('logStatus').disabled ? undefined : document.getElementById('logStatus').value
     };
 
@@ -2151,7 +2156,9 @@ document.getElementById('logForm').addEventListener('submit', async (e)=>{
       showToast('Log submitted');
     }
     editingLogId = null;
-    switchView('logs');
+    const backToPm = !!window._pmReturn;
+    window._pmLogId = null; window._pmReturn = false;
+    switchView(backToPm ? 'pm' : 'logs');
   }catch(err){ showToast((editingLogId ? 'Could not update log: ' : 'Could not submit log: ')+err.message); }
   finally{ submitBtn.disabled = false; }
 });
