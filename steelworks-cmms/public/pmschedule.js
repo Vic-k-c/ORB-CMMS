@@ -53,6 +53,9 @@
   async function loadDue() {
     const my = ++seqDue;
     const qs = new URLSearchParams({ scope: $('pmScope').value, group: $('pmGroup').value, level: $('pmLevel').value, q: $('pmSearch').value.trim() });
+    const isRange = $('pmScope').value === 'range';
+    $('pmFrom').style.display = $('pmTo').style.display = isRange ? '' : 'none';
+    if (isRange) { if ($('pmFrom').value) qs.set('from', $('pmFrom').value); if ($('pmTo').value) qs.set('to', $('pmTo').value); }
     $('pmClear').classList.toggle('filter-active', !!filtersActive());
     $('pmList').innerHTML = '<div class="empty-state"><div class="big">Loading...</div></div>';
     let d;
@@ -61,7 +64,7 @@
     if (my !== seqDue) return;
     cache = {};
     d.rows.forEach(r => { cache[r.id] = r; });
-    $('pmCount').textContent = d.rows.length ? d.rows.length + (d.rows.length >= 600 ? '+' : '') + ' visits' : '';
+    $('pmCount').textContent = d.rows.length ? d.rows.length + (d.rows.length >= 600 ? '+ visits (showing first 600 - narrow by group, level or dates)' : ' visits') : '';
     if (!d.rows.length) {
       $('pmList').innerHTML = `<div class="empty-state"><div class="big">${$('pmScope').value === 'overdue' ? 'Nothing overdue' : 'No PM visits found'}</div>
         <div>${filtersActive() ? 'Try clearing the filters.' : 'If the schedule has never been loaded, a manager can import it.'}</div>
@@ -324,17 +327,25 @@
       <div id="pmChDetail" class="pmc-detail" style="display:none;"></div>
       ${shown ? `<div class="pmc-wrap"><table class="pmc-table${wholeYear ? ' pmc-year' : ''}"><colgroup>${cols}</colgroup><thead><tr>${hMon}</tr><tr>${hWd}</tr><tr>${hDay}</tr></thead><tbody>${body}</tbody><tfoot><tr>${foot}</tr></tfoot></table></div>` : '<div class="empty-state"><div class="big">No PM visits in this period</div></div>'}`;
   }
-  document.addEventListener('click', (e) => {
+  document.addEventListener('click', async (e) => {
     const c = e.target.closest('[data-pmday]');
     if (!c || !chartData) return;
     const [mi, iso] = c.dataset.pmday.split(':');
     const m = chartData.machines[+mi];
-    const names = { W: 'Weekly', M: 'Monthly', Q: 'Quarterly', H: 'Half-yearly', A: 'Annual', S: 'Annual (shutdown)' };
     const box = $('pmChDetail');
-    box.innerHTML = `<b>${esc(m.code)} ${esc(m.name)}</b> <span class="hint" style="margin:0;">${esc(m.group)} &middot; ${esc(fmt(iso))}</span>` +
-      m.v.filter(v => v[1] === iso).map(v => `<div>${esc(names[v[2]] || v[2])} &middot; <b>${esc(v[3] === 'Planned' && v[1] < chartData.today ? 'Overdue' : v[3])}</b></div>`).join('') +
-      '<div class="hint" style="margin:4px 0 0;">To log a visit, open it from the Due tab.</div>';
-    box.style.display = ''; box.scrollIntoView({ block: 'nearest' });
+    const visits = m.v.filter(v => v[1] === iso);
+    box.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;"><div><b>${esc(m.code)} ${esc(m.name)}</b> <span class="hint" style="margin:0;">${esc(m.group)} &middot; ${esc(fmt(iso))}</span></div><button type="button" class="btn-ghost" data-pmact="closedetail">Close</button></div><div id="pmChCards" class="hint">Loading...</div>`;
+    box.style.display = ''; box.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    const onlyShutdown = visits.length && visits.every(v => v[2] === 'S');
+    if (onlyShutdown) { $('pmChCards').innerHTML = 'This is the annual service in the plant shutdown. Tick it off or change it in the <b>Shutdown</b> tab.'; return; }
+    try {
+      const d = await apiGet('/pm/due?' + new URLSearchParams({ scope: 'range', from: iso, to: iso, q: m.code }).toString());
+      const rows = d.rows.filter(r => r.machineCode === m.code);
+      rows.forEach(r => { cache[r.id] = r; });
+      $('pmList').innerHTML = ''; // avoid duplicate element ids with the Due tab (it reloads when opened)
+      window._pmToday = d.today;
+      $('pmChCards').outerHTML = '<div id="pmChCards">' + (rows.length ? rows.map(r => card(r, d.today)).join('') : '<div class="hint">No editable visit on this day.</div>') + '</div>';
+    } catch (err) { $('pmChCards').textContent = err.message; }
   });
   function downloadXlsx() {
     const y = (chartData && chartData.year) || '';
@@ -351,17 +362,18 @@
     const act = t.dataset.pmact, id = parseInt(t.dataset.id, 10);
     try {
       if (act === 'xlsx') { downloadXlsx(); return; }
-      if (act === 'log') { const r = cache[id]; if (r) await logPm(r); }
+      if (act === 'closedetail') { $('pmChDetail').style.display = 'none'; return; }
+      if (act === 'log') { const r = cache[id]; chartData = null; if (r) await logPm(r); }
       else if (act === 'viewlog') { const r = cache[id]; if (r && r.logId && window.openLogDetail) { window._logDetailBackView = 'pm'; openLogDetail(r.logId); } }
       else if (act === 'move') inlineForm(id, 'move');
       else if (act === 'skip') inlineForm(id, 'skip');
       else if (act === 'cancel') { const r = cache[id]; if (r) { const c = document.querySelector(`.pm-card[data-id="${id}"]`); if (c) c.outerHTML = card(r, localToday()); } }
       else if (act === 'movesave') {
         await apiPost('/pm/' + id + '/reschedule', { date: $('pmNewDate' + id).value, reason: $('pmReason' + id).value.trim() });
-        showToast('PM moved'); loadDue();
+        showToast('PM moved'); refreshAfterEdit(t);
       } else if (act === 'skipsave') {
         await apiPost('/pm/' + id + '/skip', { reason: $('pmReason' + id).value.trim() });
-        showToast('PM skipped'); loadDue();
+        showToast('PM skipped'); refreshAfterEdit(t);
       } else if (act === 'markall') {
         const ids = t.dataset.ids.split(',').map(Number);
         await apiPost('/pm/bulk-complete', { ids });
@@ -371,6 +383,9 @@
       }
     } catch (err) { showToast(err.message); }
   });
+  function refreshAfterEdit(t) {
+    if (t.closest('#pmChDetail')) { chartData = null; loadChart(true); } else loadDue();
+  }
   function keepOpenAndReload() {
     document.querySelectorAll('#pmShutdown details.pm-day').forEach(d => { shutOpen[d.dataset.key] = d.open; });
     loadShutdown();
@@ -414,7 +429,7 @@
       } catch (err) { t.checked = !t.checked; showToast(err.message); }
       return;
     }
-    if (['pmScope', 'pmGroup', 'pmLevel'].includes(t.id)) loadDue();
+    if (['pmScope', 'pmGroup', 'pmLevel', 'pmFrom', 'pmTo'].includes(t.id)) loadDue();
     if (t.id === 'pmPeriod') loadSummary();
     if (t.id === 'pmChYear' || t.id === 'pmChGroup') loadChart(true);
     if (t.id === 'pmChLevel' || t.id === 'pmChMonth') renderChart();
@@ -428,7 +443,7 @@
   });
   document.addEventListener('click', (e) => {
     if (e.target.id === 'pmClear') {
-      $('pmScope').value = 'week'; $('pmGroup').value = ''; $('pmLevel').value = ''; $('pmSearch').value = '';
+      $('pmScope').value = 'week'; $('pmFrom').value = ''; $('pmTo').value = ''; $('pmGroup').value = ''; $('pmLevel').value = ''; $('pmSearch').value = '';
       loadDue();
     }
   });
