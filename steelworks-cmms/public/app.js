@@ -2812,8 +2812,6 @@ function reportSummaryHtml(d){
   const topRows = d.topMachines.map((m,i)=>`
     <tr><td>${i+1}</td><td><b>${escapeHtml(m.name)}</b> <span class="matrix-code">(${escapeHtml(m.code)})</span><div class="muted-sm">${escapeHtml(m.group)}</div></td>
     <td>${m.failures}</td><td>${fmtH(m.downtimeHours)}</td><td>${fmtH(m.mttr)}</td></tr>`).join('');
-  const staffRows = d.staff.map(p=>`
-    <tr><td><b>${escapeHtml(p.name)}</b><div class="muted-sm">${escapeHtml(p.discipline)}</div></td><td>${p.jobs}</td><td>${p.breakdown}</td><td>${p.preventive}</td><td>${p.completed}</td><td>${fmtH(p.hours)}</td></tr>`).join('');
   let pmHtml = '';
   if(d.pm && d.pm.total && d.pm.total.planned > 0){
     const pt = d.pm.total, pc = v => v===null||v===undefined ? '-' : v+'%';
@@ -2839,7 +2837,7 @@ function reportSummaryHtml(d){
         : '<div class="empty-state"><div class="big">No downtime in this period</div></div>'}
     </div>
     ${topRows ? `<div class="panel-block"><h3>Top Problem Machines</h3><div class="table-scroll"><table class="matrix-table summary-table"><thead><tr><th>#</th><th>Machine</th><th>Failures</th><th>Downtime (hrs)</th><th>MTTR (hrs)</th></tr></thead><tbody>${topRows}</tbody></table></div></div>` : ''}
-    ${staffRows ? `<div class="panel-block"><h3>Technician Workload</h3><div class="table-scroll"><table class="matrix-table summary-table"><thead><tr><th>Name</th><th>Jobs</th><th>Breakdown</th><th>Preventive</th><th>Completed</th><th>Job hours</th></tr></thead><tbody>${staffRows}</tbody></table></div></div>` : ''}`;
+  `;
 }
 
 async function loadDailyReport(){
@@ -3287,11 +3285,6 @@ function pdfSummarySections(doc, y, d){
     y = pdfSection(doc, y, 'Breakdown Details' + (d.breakdowns.length>=60 ? ' (60 longest)' : ''));
     y = pdfTable(doc, y, [{h:'Date',w:19},{h:'Machine',w:36},{h:'Issue',w:42},{h:'Action taken',w:42},{h:'Hrs',w:11,a:'right'},{h:'Technician',w:20},{h:'Status',w:12}],
       d.breakdowns.map(b=>[b.date.slice(5), b.name+' ('+b.code+')', b.findings, b.actions, fmtH(b.hours), b.technician, b.status]));
-  }
-  if(d.staff.length){
-    y = pdfSection(doc, y, 'Technician Workload');
-    y = pdfTable(doc, y, [{h:'Name',w:62},{h:'Discipline',w:28},{h:'Jobs',w:18,a:'right'},{h:'Breakdown',w:24,a:'right'},{h:'Preventive',w:24,a:'right'},{h:'Done',w:14,a:'right'},{h:'Hrs',w:12,a:'right'}],
-      d.staff.map(p=>[p.name,p.discipline,p.jobs,p.breakdown,p.preventive,p.completed,fmtH(p.hours)]));
   }
   if(d.parts.length){
     y = pdfSection(doc, y, 'Parts / Items Used');
