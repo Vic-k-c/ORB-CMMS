@@ -2980,20 +2980,6 @@ app.get('/api/reports/summary', async (req, res) => {
     }).filter(r => r.downtimeHours > 0 || r.failures > 0)
       .sort((a, b) => b.downtimeHours - a.downtimeHours || b.failures - a.failures).slice(0, 10);
 
-    const staffRows = await dbAll(`
-      SELECT s.id, s.name, s.discipline, l.log_type, l.status, l.downtime_hours
-      FROM log_staff ls JOIN staff s ON s.id = ls.staff_id JOIN logs l ON l.id = ls.log_id
-      WHERE l.organization_id = $1 AND LEFT(l.logged_at,10) BETWEEN $2 AND $3
-    `, [orgId, fromDate, toDate]);
-    const sm = new Map();
-    staffRows.forEach(r => {
-      const p = sm.get(r.id) || { name: r.name, discipline: r.discipline, jobs: 0, breakdown: 0, preventive: 0, completed: 0, hours: 0 };
-      p.jobs++; if (r.log_type === 'Breakdown') p.breakdown++; else p.preventive++;
-      if (r.status === 'Completed' || r.status === 'Reviewed') p.completed++;
-      p.hours += Number(r.downtime_hours) || 0; sm.set(r.id, p);
-    });
-    const staff = Array.from(sm.values()).map(p => ({ ...p, hours: round2(p.hours) })).sort((a, b) => b.jobs - a.jobs);
-
     const parts = inRange.filter(l => l.parts_used && String(l.parts_used).trim()).slice(0, 80).map(l => {
       const m = mById.get(l.machine_id) || {};
       return { date: l.logged_at.slice(0, 10), code: m.code || '', name: m.name || '', parts: l.parts_used };
@@ -3009,7 +2995,7 @@ app.get('/api/reports/summary', async (req, res) => {
 
     let pm = null;
     try { pm = await app.locals.pm.summary(orgId, fromDate, toDate); } catch (pmErr) { console.error('pm summary failed:', pmErr.message); }
-    res.json({ fromDate, toDate, totals, groups, topMachines, staff, parts, breakdowns, pm });
+    res.json({ fromDate, toDate, totals, groups, topMachines, parts, breakdowns, pm });
   } catch (e) { res.status(500).json({ error: 'Could not load report summary: ' + e.message }); }
 });
 
