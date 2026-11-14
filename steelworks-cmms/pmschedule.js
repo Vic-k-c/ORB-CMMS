@@ -37,7 +37,7 @@
         groupsLoaded = true;
       } catch (e) { /* list still works without the group filter */ }
     }
-    $('pmImportBox').style.display = isManagement() ? '' : 'none';
+    if ($('pmImportBox')) $('pmImportBox').style.display = isManagement() ? '' : 'none';
     setTab(tab);
   };
 
@@ -258,8 +258,7 @@
         await apiPost('/pm/bulk-complete', { ids });
         showToast(ids.length + ' marked done'); keepOpenAndReload();
       } else if (act === 'import') {
-        $('pmImportBox').scrollIntoView({ behavior: 'smooth', block: 'center' });
-        showToast('Choose the PM file in the yellow box above');
+        pickImportFile();
       }
     } catch (err) { showToast(err.message); }
   });
@@ -267,10 +266,22 @@
     document.querySelectorAll('#pmShutdown details.pm-day').forEach(d => { shutOpen[d.dataset.key] = d.open; });
     loadShutdown();
   }
+  // The Import button opens the phone / PC file chooser directly
+  function pickImportFile() {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.json,application/json'; inp.style.display = 'none';
+    inp.addEventListener('change', async () => {
+      const f = inp.files && inp.files[0];
+      inp.remove();
+      if (f) { try { await doImport(f); } catch (err) { showToast(err.message); } }
+    });
+    document.body.appendChild(inp);
+    inp.click();
+  }
   async function doImport(file) {
     let data;
     try { data = JSON.parse(await file.text()); } catch (e) { showToast('That file is not a valid PM file'); return; }
-    data.mode = $('pmImportMode').value;
+    data.mode = $('pmImportMode') ? $('pmImportMode').value : 'merge';
     const r = await apiPost('/pm/import', data);
     showToast('Imported: ' + r.inserted + ' new visits, ' + r.plans + ' machines, ' + r.templates + ' checklist levels' +
       (r.removed ? ', ' + r.removed + ' old planned visits replaced' : '') +
