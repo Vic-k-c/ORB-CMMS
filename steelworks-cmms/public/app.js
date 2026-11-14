@@ -407,7 +407,7 @@ async function showAppShell(){
   document.getElementById('machinesNavBtn').style.display = hasPermission('view_machines') ? '' : 'none';
   document.getElementById('logsNavBtn').style.display = (hasPermission('submit_logs') || hasPermission('manage_logs')) ? '' : 'none';
   document.getElementById('reportsNavBtn').style.display = hasPermission('view_reports') ? '' : 'none';
-  document.getElementById('performanceNavBtn').style.display = hasPermission('view_reports') ? '' : 'none';
+  document.getElementById('performanceNavBtn').style.display = (hasPermission('view_reports') && currentUser && currentUser.performanceAccess) ? '' : 'none';
   { const pb = document.getElementById('pmNavBtn'); if(pb) pb.style.display = hasPermission('view_machines') ? '' : 'none'; }
   document.getElementById('logsStaffBtn').style.display = (isManagement() || currentUser.role==='Maintenance Supervisor') ? '' : 'none';
   document.getElementById('kanbanNavBtn').style.display = (currentUser && currentUser.boardsAccess) ? '' : 'none';
@@ -673,6 +673,7 @@ window.addEventListener('popstate', (e)=>{
 // ============ NAVIGATION ============
 function switchView(name){
   if(name.indexOf('kanban')===0 && !(currentUser && currentUser.boardsAccess)){ showToast('Boards are not enabled for your account'); return; }
+  if(name==='performance' && !(currentUser && currentUser.performanceAccess)){ showToast('Performance is not enabled for your account'); return; }
   if(name==='admin' && !isManagement()){ showToast('Management access required'); return; }
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.getElementById('view-'+name).classList.add('active');
@@ -892,6 +893,9 @@ async function loadDashboard(){
   try{
     const data = await apiGet('/dashboard');
     document.getElementById('pmDueSoonValue').textContent = data.pmDueSoon;
+    { const sub = document.getElementById('pmDueSoonSub'), card = document.getElementById('pmDueCard');
+      if(sub) sub.innerHTML = data.pmOverdue === null || data.pmOverdue === undefined ? 'Next 7 days' : 'Next 7 days &middot; <b>' + data.pmOverdue + ' overdue</b>';
+      if(card) card.classList.toggle('alert', !!data.pmOverdue); }
     document.getElementById('machinesDownValue').textContent = data.machinesDown;
     window._machinesDownListData = data.machinesDownList || [];
     renderMachinesDownList();
@@ -2265,6 +2269,8 @@ async function openEditOrgForm(orgId){
     userSelect.innerHTML = users.length===0
       ? '<option value="">No users in this organization</option>'
       : users.map(u=>`<option value="${u.id}">${escapeHtml(u.name)} (@${escapeHtml(u.username)}, ${u.role})</option>`).join('');
+    document.getElementById('performanceAccessList').innerHTML = users.length===0 ? '' : users.map(u=>`
+      <label class="boards-access-row"><input type="checkbox" ${u.performanceAccess?'checked':''} onchange="setPerformanceAccess('${u.id}', this)"> <span>${escapeHtml(u.name)} <span class="label-note">(@${escapeHtml(u.username)}, ${escapeHtml(u.role)})</span></span></label>`).join('');
     document.getElementById('boardsAccessList').innerHTML = users.length===0 ? '' : users.map(u=>`
       <label class="boards-access-row"><input type="checkbox" ${u.boardsAccess?'checked':''} onchange="setBoardsAccess('${u.id}', this)"> <span>${escapeHtml(u.name)} <span class="label-note">(@${escapeHtml(u.username)}, ${escapeHtml(u.role)})</span></span></label>`).join('');
   }catch(e){ userSelect.innerHTML = '<option value="">Could not load users</option>'; }
@@ -2280,6 +2286,16 @@ async function setBoardsAccess(userId, box){
   finally{ box.disabled = false; }
 }
 window.setBoardsAccess = setBoardsAccess;
+
+async function setPerformanceAccess(userId, box){
+  box.disabled = true;
+  try{
+    await apiPut('/super-admin/users/'+userId+'/performance-access', { enabled: box.checked });
+    showToast(box.checked ? 'Performance enabled for this user' : 'Performance hidden for this user');
+  }catch(e){ box.checked = !box.checked; showToast('Could not change Performance access: '+e.message); }
+  finally{ box.disabled = false; }
+}
+window.setPerformanceAccess = setPerformanceAccess;
 
 function refreshOrgIconSection(org){
   const v = encodeURIComponent(org.appIconVersion || 'default');
@@ -2798,6 +2814,14 @@ function reportSummaryHtml(d){
     <td>${m.failures}</td><td>${fmtH(m.downtimeHours)}</td><td>${fmtH(m.mttr)}</td></tr>`).join('');
   const staffRows = d.staff.map(p=>`
     <tr><td><b>${escapeHtml(p.name)}</b><div class="muted-sm">${escapeHtml(p.discipline)}</div></td><td>${p.jobs}</td><td>${p.breakdown}</td><td>${p.preventive}</td><td>${p.completed}</td><td>${fmtH(p.hours)}</td></tr>`).join('');
+  let pmHtml = '';
+  if(d.pm && d.pm.total && d.pm.total.planned > 0){
+    const pt = d.pm.total, pc = v => v===null||v===undefined ? '-' : v+'%';
+    const prow = d.pm.groups.map(g=>`<tr><td><b>${escapeHtml(g.group)}</b></td><td>${g.planned}</td><td>${g.due}</td><td>${g.dueDone}</td><td>${g.overdue}</td><td>${pc(g.donePct)}</td></tr>`).join('');
+    pmHtml = `<div class="panel-block"><h3>Planned Maintenance (PM Schedule)</h3>
+      <div class="hint">Planned ${pt.planned} &middot; done ${pt.done} &middot; on time ${pc(pt.onTimePct)} of those due &middot; overdue now ${d.pm.overdueNow}</div>
+      <div class="table-scroll"><table class="matrix-table summary-table"><thead><tr><th>Group</th><th>Planned</th><th>Due</th><th>Done</th><th>Overdue</th><th>Done %</th></tr></thead><tbody>${prow}</tbody></table></div></div>`;
+  }
   return `
     <div class="chart-panel summary-kpis">
       <h3>Maintenance Summary</h3>
@@ -2810,7 +2834,8 @@ function reportSummaryHtml(d){
       </div>
     </div>
     <div class="panel-block"><h3>Downtime by Group</h3>
-      ${groupRows ? `<div class="table-scroll"><table class="matrix-table summary-table"><thead><tr><th>Group</th><th>Machines</th><th>Failures</th><th>Downtime (hrs)</th><th>Share</th><th>MTTR (hrs)</th><th>MTBF (hrs)</th></tr></thead><tbody>${groupRows}</tbody></table></div>`
+      ${pmHtml}
+    ${groupRows ? `<div class="table-scroll"><table class="matrix-table summary-table"><thead><tr><th>Group</th><th>Machines</th><th>Failures</th><th>Downtime (hrs)</th><th>Share</th><th>MTTR (hrs)</th><th>MTBF (hrs)</th></tr></thead><tbody>${groupRows}</tbody></table></div>`
         : '<div class="empty-state"><div class="big">No downtime in this period</div></div>'}
     </div>
     ${topRows ? `<div class="panel-block"><h3>Top Problem Machines</h3><div class="table-scroll"><table class="matrix-table summary-table"><thead><tr><th>#</th><th>Machine</th><th>Failures</th><th>Downtime (hrs)</th><th>MTTR (hrs)</th></tr></thead><tbody>${topRows}</tbody></table></div></div>` : ''}
@@ -3247,6 +3272,17 @@ function pdfSummarySections(doc, y, d){
   const tot = t.preventive + t.breakdown;
   y = pdfTable(doc, y, [{h:'Type',w:60},{h:'Jobs',w:30,a:'right'},{h:'Share',w:30,a:'right'}],
     [['Preventive', t.preventive, tot?Math.round(t.preventive/tot*100)+'%':'-'],['Breakdown', t.breakdown, tot?Math.round(t.breakdown/tot*100)+'%':'-']]);
+  if(d.pm && d.pm.total && d.pm.total.planned > 0){
+    const pt = d.pm.total, pc = v => v===null||v===undefined ? '-' : v+'%';
+    y = pdfSection(doc, y, 'Planned Maintenance (PM Schedule)');
+    y = pdfTable(doc, y, [{h:'Group',w:56},{h:'Planned',w:22,a:'right'},{h:'Due',w:18,a:'right'},{h:'Done',w:18,a:'right'},{h:'On time',w:22,a:'right'},{h:'Overdue',w:22,a:'right'},{h:'Done %',w:22,a:'right'}],
+      d.pm.groups.map(g=>[g.group,g.planned,g.due,g.dueDone,g.dueOnTime,g.overdue,pc(g.donePct)]).concat([['TOTAL',pt.planned,pt.due,pt.dueDone,pt.dueOnTime,pt.overdue,pc(pt.donePct)]]));
+    if(d.pm.overdueList && d.pm.overdueList.length){
+      y = pdfSection(doc, y, 'Overdue PM Visits (as at '+d.pm.today+')');
+      y = pdfTable(doc, y, [{h:'Machine',w:78},{h:'Group',w:46},{h:'Visit',w:28},{h:'Due',w:20},{h:'Days late',w:10,a:'right'}],
+        d.pm.overdueList.map(o=>[o.machine+' ('+o.code+')', o.group, o.levelName, o.dueDate.slice(5), o.daysLate]));
+    }
+  }
   if(d.breakdowns.length){
     y = pdfSection(doc, y, 'Breakdown Details' + (d.breakdowns.length>=60 ? ' (60 longest)' : ''));
     y = pdfTable(doc, y, [{h:'Date',w:19},{h:'Machine',w:36},{h:'Issue',w:42},{h:'Action taken',w:42},{h:'Hrs',w:11,a:'right'},{h:'Technician',w:20},{h:'Status',w:12}],
