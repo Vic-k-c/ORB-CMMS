@@ -3,10 +3,9 @@
 // already filled in as a Preventive log) and the schedule closes by itself.
 (function () {
   const $ = id => document.getElementById(id);
-  const LV = { W: 'Weekly', M: 'Monthly', Q: 'Quarterly', H: 'Half-yearly', A: 'Annual', S: 'Dec shutdown' };
-  let tab = 'due', seqDue = 0, seqSum = 0, seqShut = 0, cache = {}, groupsLoaded = false, shutOpen = {};
+    let tab = 'due', seqDue = 0, seqSum = 0, seqShut = 0, cache = {}, groupsLoaded = false, shutOpen = {};
 
-  function localToday() { return new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' }); }
+  function localToday() { return window._pmToday || new Date().toLocaleDateString('en-CA'); }
   function addDays(s, n) { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
   function fmt(d) {
     if (!d) return '';
@@ -17,6 +16,8 @@
   function daysBetween(a, b) { return Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000); }
   const esc = s => escapeHtml(s == null ? '' : String(s));
   const canAct = () => hasPermission('submit_logs');
+  // A real file control (tapped directly) works in every phone browser; no accept filter so .json is never greyed out
+  const FILE_BTN = '<p><label class="btn-primary pm-file-btn">Choose PM file (.json)<input type="file" class="pm-file-input"></label></p>';
 
   // ---------- tabs ----------
   function setTab(t) {
@@ -38,10 +39,7 @@
         groupsLoaded = true;
       } catch (e) { /* list still works without the group filter */ }
     }
-    const y = parseInt(localToday().slice(0, 4), 10);
-    if (!$('pmShutYear').options.length) {
-      $('pmShutYear').innerHTML = [y, y + 1].map(v => `<option value="${v}">${v}</option>`).join('');
-    }
+    if ($('pmImportBox')) $('pmImportBox').style.display = isManagement() ? '' : 'none';
     setTab(tab);
   };
 
@@ -64,10 +62,10 @@
     if (!d.rows.length) {
       $('pmList').innerHTML = `<div class="empty-state"><div class="big">${$('pmScope').value === 'overdue' ? 'Nothing overdue' : 'No PM visits found'}</div>
         <div>${filtersActive() ? 'Try clearing the filters.' : 'If the schedule has never been loaded, a manager can import it.'}</div>
-        ${isManagement() ? '<p><button type="button" class="btn-primary" data-pmact="import">Import PM schedule</button></p>' : ''}</div>`;
+        ${isManagement() ? FILE_BTN : ''}</div>`;
       return;
     }
-    const today = d.today;
+    const today = d.today; window._pmToday = d.today;
     let lastDate = '';
     $('pmList').innerHTML = d.rows.map(r => {
       const head = r.dueDate !== lastDate ? `<div class="pm-date-head">${fmt(r.dueDate)}${r.dueDate === today ? ' <span class="pm-today">TODAY</span>' : ''}</div>` : '';
@@ -173,31 +171,30 @@
         <div class="stat-card-mini ${t.onTimePct !== null && t.onTimePct < 70 ? 'warn' : ''}"><div class="stat-label">On time (of due)</div><div class="stat-value">${t.onTimePct === null ? '-' : t.onTimePct + '%'}</div></div>
         <div class="stat-card-mini ${d.overdueNow > 0 ? 'alert' : ''}"><div class="stat-label">Overdue now</div><div class="stat-value">${d.overdueNow}</div></div>
       </div>
-      <div class="hint">Done % and On time % are measured on visits already due. "On time" = done within 3 days of the due date. Dec shutdown visits are included in Planned and Done.</div>
+      <div class="hint">Done % and On time % are measured on visits already due. "On time" = done within 3 days of the due date. Shutdown visits are included in Planned and Done.</div>
       ${d.groups.length ? `<div class="panel-block"><h3>By machine group</h3><div class="table-scroll"><table class="matrix-table summary-table">${head('Group')}<tbody>${rows(d.groups)}</tbody></table></div></div>` : ''}
       ${d.levels.length ? `<div class="panel-block"><h3>By visit level</h3><div class="table-scroll"><table class="matrix-table summary-table">${head('Level')}<tbody>${rows(d.levels)}</tbody></table></div></div>` : ''}
       ${!d.groups.length ? '<div class="empty-state"><div class="big">No PM visits in this period</div></div>' : ''}`;
   }
 
   // ---------- shutdown ----------
-  const META_KEYS = [['Wheelabrator', 'Wheelabrator'], ['Prismtech', 'Prismtech'], ['CNC Saw', 'CNC Saw'], ['Vanguard', 'Vanguard'], ['Tipo', 'Tipo B'],
-    ['Angleline', 'Angleline'], ['Welding', 'Welding'], ['Plasma', 'Plasma'], ['Cranes', 'Cranes'], ['Screw', 'Screw'], ['Piston', 'Piston'], ['Shearing', 'Shearing']];
-  function metaFor(groups, name) {
-    const k = META_KEYS.find(x => name.indexOf(x[0]) >= 0);
-    return k ? groups.find(g => g.name.indexOf(k[1]) >= 0) : null;
-  }
+  function metaFor(groups, name) { return groups.find(g => g.name === name) || null; }
   async function loadShutdown() {
     const my = ++seqShut;
-    const year = $('pmShutYear').value || localToday().slice(0, 4);
+    const yv = $('pmShutYear').value;
     $('pmShutdown').innerHTML = '<div class="empty-state"><div class="big">Loading...</div></div>';
     let d;
-    try { d = await apiGet('/pm/shutdown?year=' + year); }
+    try { d = await apiGet('/pm/shutdown' + (yv ? '?year=' + yv : '')); }
     catch (e) { if (my === seqShut) $('pmShutdown').innerHTML = `<div class="empty-state"><div class="big">Could not load</div><div>${esc(e.message)}</div></div>`; return; }
     if (my !== seqShut) return;
     cache = {};
     d.rows.forEach(r => { cache[r.id] = r; });
+    const year = String(d.year);
+    if (d.years && d.years.length) {
+      $('pmShutYear').innerHTML = d.years.map(v => `<option value="${v}" ${String(v) === year ? 'selected' : ''}>${v}</option>`).join('');
+    }
     if (!d.rows.length) {
-      $('pmShutdown').innerHTML = `<div class="empty-state"><div class="big">No shutdown plan for ${esc(year)}</div>${isManagement() ? '<p><button type="button" class="btn-primary" data-pmact="import">Import PM schedule</button></p>' : ''}</div>`;
+      $('pmShutdown').innerHTML = `<div class="empty-state"><div class="big">No shutdown plan loaded${d.years && d.years.length ? ' for ' + esc(year) : ''}</div>${isManagement() ? FILE_BTN : ''}</div>`;
       return;
     }
     const total = d.rows.length, done = d.rows.filter(r => r.status === 'Done').length;
@@ -263,10 +260,7 @@
         await apiPost('/pm/bulk-complete', { ids });
         showToast(ids.length + ' marked done'); keepOpenAndReload();
       } else if (act === 'import') {
-        const r = await apiPost('/pm/import', {});
-        showToast('Imported ' + r.inserted + ' visits' + (r.unmatched.length ? ' - ' + r.unmatched.length + ' machine codes not found' : ''), true);
-        if (r.unmatched.length) console.warn('PM import - unmatched codes:', r.unmatched.join(', '));
-        setTab(tab);
+        pickImportFile();
       }
     } catch (err) { showToast(err.message); }
   });
@@ -274,8 +268,36 @@
     document.querySelectorAll('#pmShutdown details.pm-day').forEach(d => { shutOpen[d.dataset.key] = d.open; });
     loadShutdown();
   }
+  // The Import button opens the phone / PC file chooser directly
+  function pickImportFile() {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.style.display = 'none';
+    inp.addEventListener('change', async () => {
+      const f = inp.files && inp.files[0];
+      inp.remove();
+      if (f) { try { await doImport(f); } catch (err) { showToast(err.message); } }
+    });
+    document.body.appendChild(inp);
+    inp.click();
+  }
+  async function doImport(file) {
+    let data;
+    try { data = JSON.parse(await file.text()); } catch (e) { showToast('That file is not a valid PM file'); return; }
+    data.mode = $('pmImportMode') ? $('pmImportMode').value : 'merge';
+    const r = await apiPost('/pm/import', data);
+    showToast('Imported: ' + r.inserted + ' new visits, ' + r.plans + ' machines, ' + r.templates + ' checklist levels' +
+      (r.removed ? ', ' + r.removed + ' old planned visits replaced' : '') +
+      (r.unmatched.length ? '. ' + r.unmatched.length + ' machine codes not found in your register' : ''), true);
+    if (r.unmatched.length) console.warn('PM import - machine codes not found:', r.unmatched.join(', '));
+    groupsLoaded = false; await window.loadPmPage();
+  }
   document.addEventListener('change', async (e) => {
     const t = e.target;
+    if (t.id === 'pmImportFile' || t.classList.contains('pm-file-input')) {
+      const f = t.files && t.files[0]; t.value = '';
+      if (f) { showToast('Importing ' + f.name + '...'); try { await doImport(f); } catch (err) { showToast(err.message); } }
+      return;
+    }
     if (t.matches('input[data-pmact="tick"]')) {
       const id = parseInt(t.dataset.id, 10);
       try {
