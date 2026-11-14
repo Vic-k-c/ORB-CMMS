@@ -183,6 +183,10 @@
     <div class="label-note" style="margin-bottom:8px;">Boards are hidden for everyone. Tick a person to give them the Boards section.</div>
     <div id="boardsAccessList"></div>
 
+    <h2 style="margin-top:26px;font-size:15px;">Performance access</h2>
+    <div class="label-note" style="margin-bottom:8px;">Employee Performance is hidden for everyone. Tick a person to give them the Performance section.</div>
+    <div id="performanceAccessList"></div>
+
     <h2 style="margin-top:26px;font-size:15px;">Reset a User's Password</h2>
     <label for="resetPasswordUser">User</label>
     <select id="resetPasswordUser"></select>
@@ -242,11 +246,11 @@
     </div>
 
     <div class="stat-grid">
-      <div class="stat-card-mini warn">
+      <div class="stat-card-mini warn" id="pmDueCard" onclick="switchView('pm')" style="cursor:pointer;">
         <div class="stat-icon">&#128295;</div>
         <div class="stat-value" id="pmDueSoonValue">&mdash;</div>
         <div class="stat-label">PM Due Soon</div>
-        <div class="stat-sub">Next 7 days</div>
+        <div class="stat-sub" id="pmDueSoonSub">Next 7 days</div>
       </div>
       <div class="stat-card-mini alert" id="machinesDownCard" onclick="toggleMachinesDownList()" style="cursor:pointer;">
         <div class="stat-icon">&#9888;&#65039;</div>
@@ -781,8 +785,17 @@
       <div class="view-toggle" id="pmTabs">
         <button type="button" data-pmtab="due" class="active">Due</button>
         <button type="button" data-pmtab="compliance">Compliance</button>
-        <button type="button" data-pmtab="shutdown">Dec Shutdown</button>
+        <button type="button" data-pmtab="shutdown">Shutdown</button>
       </div>
+    </div>
+
+    <div class="pm-import" id="pmImportBox" style="display:none;">
+      <b>Import PM data</b> <span class="hint" style="margin:0;">Choose the PM file prepared for your plant (.json).</span>
+      <select id="pmImportMode">
+        <option value="merge">Add new visits only</option>
+        <option value="replace">Replace upcoming planned visits</option>
+      </select>
+      <input type="file" id="pmImportFile" accept=".json,application/json">
     </div>
 
     <div id="pmTabDue">
@@ -821,7 +834,7 @@
     <div id="pmTabShutdown" style="display:none;">
       <div class="search-bar pm-filters">
         <select id="pmShutYear"></select>
-        <span class="hint" style="margin:0;">Annual service for the machines in the December plant shutdown. Tick each machine when its day's work is done.</span>
+        <span class="hint" style="margin:0;">Annual service for the machines in the plant shutdown. Tick each machine when its day's work is done.</span>
       </div>
       <div id="pmShutdown"></div>
     </div>
@@ -1056,4 +1069,4 @@
 <script src="/kanban.js"></script>
 <script src="/pmschedule.js"></script>
 </body>
-        </html>
+</html>
