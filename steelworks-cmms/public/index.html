@@ -806,7 +806,13 @@
           <option value="today">Due today</option>
           <option value="week" selected>Next 7 days</option>
           <option value="month">Next 30 days</option>
+          <option value="quarter">Next 90 days</option>
+          <option value="year">Rest of this year</option>
+          <option value="upcoming">All upcoming</option>
+          <option value="range">Pick dates...</option>
         </select>
+        <input type="date" id="pmFrom" style="display:none;" title="From">
+        <input type="date" id="pmTo" style="display:none;" title="To">
         <select id="pmGroup"><option value="">All groups</option></select>
         <select id="pmLevel">
           <option value="">All levels</option>
