@@ -853,3 +853,8 @@ thead .pmc-name{background:#0B2545;z-index:4;}
 .pmc-H{background:#FFE699;color:#7F6000;} .pmc-A{background:#F4B183;color:#833C0B;} .pmc-S{background:#D9C3E8;color:#5B2C83;}
 .pmc-dn{background:#C6EFCE;color:#006100;} .pmc-od{background:#FFC7CE;color:#9C0006;}
 .pmc-detail{background:#fff8e1;border:1px solid #f0d27a;border-radius:8px;padding:8px 12px;margin:8px 0;font-size:13px;}
+
+.pmc-wd{font-size:9px;font-weight:600;padding:2px 0;min-width:24px;}
+.pmc-we{background-image:linear-gradient(rgba(0,0,0,.06),rgba(0,0,0,.06));}
+.pmc-sum{font-size:10px;font-weight:700;color:#4a5568;background:#f3f6fb;}
+.pmc-table tfoot td{position:sticky;bottom:0;z-index:2;border-top:2px solid #cfd8e6;}
