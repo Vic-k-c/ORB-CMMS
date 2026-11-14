@@ -462,7 +462,7 @@ module.exports = function (app, h) {
   app.get('/api/pm/export', requirePermission('view_machines'), async (req, res) => {
     try {
       const orgId = req.session.user.organizationId;
-      const org = await dbGet('SELECT name FROM organizations WHERE id = $1', [orgId]);
+      const org = (await dbGet('SELECT * FROM organizations WHERE id = $1', [orgId])) || {};
       const yrs = await dbAll(`SELECT DISTINCT EXTRACT(YEAR FROM due_date)::int AS y FROM pm_schedule WHERE organization_id = $1 ORDER BY 1`, [orgId]);
       const year = pickYear(yrs.map(r => r.y), req);
       const group = String(req.query.group || '').trim();
@@ -470,155 +470,160 @@ module.exports = function (app, h) {
       const td = today();
       const plans = await loadPlans(orgId);
       const wb = new ExcelJS.Workbook();
-      wb.creator = (org && org.name ? org.name : 'CMMS') + ' - CMMS';
-      const NAVY = 'FF0B2545';
-      const head = (ws, rowNo) => { const r = ws.getRow(rowNo); r.font = { bold: true, color: { argb: 'FFFFFFFF' } }; r.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }; r.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; };
-      const FILL = { W: 'FFDDEBF7', M: 'FFBDD7EE', Q: 'FFC6E0B4', H: 'FFFFE699', A: 'FFF4B183', S: 'FFD9C3E8' };
+      wb.creator = (org.name || 'CMMS') + ' - CMMS';
+      const NAVY = 'FF0B2545', BAND = 'FF1F3A5F';
       const solid = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
       const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
-      const title = `${org && org.name ? org.name : ''} - Preventive Maintenance ${year}${group ? ' - ' + group : ''}`;
-
-      // 1. chart: machines down, every day of the year across
-      const ws = wb.addWorksheet('PM Chart', { views: [{ state: 'frozen', xSplit: 3, ySplit: 5 }] });
-      const DAYN0 = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-      const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-      const yStart = Date.UTC(year, 0, 1);
-      const nDays = Math.round((Date.UTC(year, 11, 31) - yStart) / 86400000) + 1;
-      ws.getCell('A1').value = title; ws.getCell('A1').font = { bold: true, size: 14, color: { argb: NAVY } };
-      ws.getCell('A2').value = 'Every column is one day. W weekly, M monthly, Q quarterly, H half-yearly, A annual, S annual at shutdown. Green = done, red = overdue. Weekends shaded.';
-      ws.getCell('A2').font = { italic: true, size: 9 };
-      ws.getRow(3).values = ['', '', ''];
-      ws.getRow(4).values = ['', '', ''];
-      ws.getRow(5).values = ['Code', 'Machine', 'Group'];
-      for (let n = 0; n < nDays; n++) {
-        const d = new Date(yStart + n * 86400000);
-        const c = 4 + n;
-        if (d.getUTCDate() === 1) ws.getRow(3).getCell(c).value = monthNames[d.getUTCMonth()];
-        ws.getRow(4).getCell(c).value = DAYN0[d.getUTCDay()];
-        ws.getRow(5).getCell(c).value = d.getUTCDate();
-        ws.getColumn(c).width = 3.1;
-      }
-      ws.getColumn(1).width = 12; ws.getColumn(2).width = 34; ws.getColumn(3).width = 20;
-      head(ws, 3); head(ws, 4); head(ws, 5);
-      ws.getRow(4).font = { bold: true, size: 7, color: { argb: 'FFFFFFFF' } };
-      ws.getRow(5).font = { bold: true, size: 7, color: { argb: 'FFFFFFFF' } };
+      const heavy = { style: 'medium', color: { argb: NAVY } };
+      const FILL = { W: 'FFDDEBF7', M: 'FFBDD7EE', Q: 'FFC6E0B4', H: 'FFFFE699', A: 'FFF4B183', S: 'FFD9C3E8' };
+      const title = `Preventive Maintenance ${year}${group ? ' - ' + group : ''}`;
+      const lh = h.letterhead || {};
+      const brandLines = String(lh.brandText ? lh.brandText(org) : (org.name || '')).split('\n').map(x => x.trim()).filter(Boolean).slice(0, 2);
+      const docLine = ['Document No. ' + (org.doc_no_excel || 'N/A'), 'Effective Date: ' + (org.doc_effective_date_excel || 'N/A'), 'Rev: ' + (org.doc_rev_excel || 'N/A'), 'Approved By: ' + (org.approved_by || 'N/A')].join('     ');
+      // logo + company name + title, rows 1-3 of every sheet; row 4 = document control / note
+      const letterhead = (ws, sheetTitle, note) => {
+        [1, 2, 3].forEach(i => { ws.getRow(i).height = 22; });
+        if (lh.addLogo) { try { lh.addLogo(wb, ws, org); } catch (e) { /* logo is optional */ } }
+        const texts = brandLines.concat([sheetTitle + ' - ' + title]).slice(-3);
+        texts.forEach((t, i) => {
+          const c = ws.getRow(i + 1).getCell(3);
+          c.value = t;
+          c.font = i === texts.length - 1 ? { bold: true, size: 12, color: { argb: NAVY } } : { bold: i === 0, size: i === 0 ? 14 : 10, color: { argb: NAVY } };
+          c.alignment = { vertical: 'middle' };
+        });
+        const n = ws.getRow(4).getCell(1); n.value = note ? docLine + '     |     ' + note : docLine; n.font = { italic: true, size: 9 };
+      };
+      const head = (ws, rowNo, lastCol) => {
+        const r = ws.getRow(rowNo);
+        for (let c = 1; c <= lastCol; c++) { const x = r.getCell(c); x.fill = solid(NAVY); x.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 }; x.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; }
+      };
+      const band = (ws, rowNo, name, lastCol) => {
+        const r = ws.getRow(rowNo);
+        for (let c = 1; c <= lastCol; c++) { const x = r.getCell(c); x.fill = solid(BAND); x.border = { top: heavy, bottom: heavy }; }
+        const a = r.getCell(1); a.value = String(name).toUpperCase(); a.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+      };
+      const closeGroup = (ws, rowNo, lastCol) => {
+        const r = ws.getRow(rowNo);
+        for (let c = 1; c <= lastCol; c++) { const x = r.getCell(c); x.border = Object.assign({}, x.border, { bottom: heavy }); }
+      };
+      const dayCell = (cell, list) => {
+        list.sort((a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level]);
+        cell.value = list.map(x => x.level).join('');
+        const overdue = list.some(x => (x.status === 'Planned' || x.status === 'In progress') && x.due_date < td);
+        const allDone = list.every(x => x.status === 'Done' || x.status === 'Skipped');
+        cell.fill = solid(overdue ? 'FFFFC7CE' : allDone ? 'FFC6EFCE' : FILL[list[0].level]);
+        cell.font = { bold: true, size: 8, color: { argb: overdue ? 'FF9C0006' : 'FF1F2937' } };
+        cell.alignment = { horizontal: 'center' };
+        cell.border = { top: thin, left: thin, bottom: thin, right: thin };
+      };
       const byM = new Map();
       rows.forEach(r => { if (!byM.has(r.machine_id)) byM.set(r.machine_id, { r0: r, v: [] }); byM.get(r.machine_id).v.push(r); });
-      let rowNo = 6;
-      for (const m of byM.values()) {
-        const row = ws.getRow(rowNo++);
-        row.getCell(1).value = m.r0.machine_code; row.getCell(2).value = m.r0.machine_name; row.getCell(3).value = m.r0.machine_group || '';
-        const days = new Map();
-        m.v.forEach(v => {
-          const n = Math.round((new Date(v.due_date + 'T00:00:00Z') - yStart) / 86400000);
-          if (!days.has(n)) days.set(n, []); days.get(n).push(v);
-        });
-        for (const [n, list] of days) {
-          list.sort((a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level]);
-          const cell = row.getCell(4 + n);
-          cell.value = list.map(x => x.level).join('');
-          const overdue = list.some(x => (x.status === 'Planned' || x.status === 'In progress') && x.due_date < td);
-          const allDone = list.every(x => x.status === 'Done' || x.status === 'Skipped');
-          cell.fill = solid(overdue ? 'FFFFC7CE' : allDone ? 'FFC6EFCE' : FILL[list[0].level]);
-          cell.font = { bold: true, size: 7, color: { argb: overdue ? 'FF9C0006' : 'FF1F2937' } };
-          cell.alignment = { horizontal: 'center' };
-        }
-      }
-      ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: Math.max(5, rowNo - 1), column: 3 } };
-      ws.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 8 };
-
-      // 2b. one sheet per month, every day as a column
+      const machines = Array.from(byM.values());
+      const grpOf = m => m.r0.machine_group || 'Uncategorised';
       const DAYN = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-      const MFULL = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const MNAME = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+      const KEY_NOTE = 'W weekly, M monthly, Q quarterly, H half-yearly, A annual, S annual at shutdown. Green = done, red = overdue.';
+
+      // grid sheet: machines down, one column per day between two dates, grouped by category
+      const grid = (ws, y, m0, m1, firstDataRow, headRows) => {
+        const start = Date.UTC(y, m0, 1), end = Date.UTC(y, m1 + 1, 0);
+        const nD = Math.round((end - start) / 86400000) + 1, last = 3 + nD;
+        const [rMon, rWd, rDay] = headRows;
+        ws.getRow(rWd).getCell(1).value = 'Code'; ws.getRow(rWd).getCell(2).value = 'Machine'; ws.getRow(rWd).getCell(3).value = 'Group';
+        for (let n = 0; n < nD; n++) {
+          const d = new Date(start + n * 86400000), c = 4 + n;
+          if (rMon && d.getUTCDate() === 1) ws.getRow(rMon).getCell(c).value = MNAME[d.getUTCMonth()];
+          ws.getRow(rWd).getCell(c).value = DAYN[d.getUTCDay()];
+          ws.getRow(rDay).getCell(c).value = d.getUTCDate();
+          ws.getColumn(c).width = nD > 40 ? 3.1 : 4.6;
+        }
+        ws.getColumn(1).width = 12; ws.getColumn(2).width = 34; ws.getColumn(3).width = 20;
+        head(ws, rWd, last); head(ws, rDay, last); if (rMon) head(ws, rMon, last);
+        ws.getRow(rWd).font = { bold: true, size: 7, color: { argb: 'FFFFFFFF' } };
+        ws.getRow(rDay).font = { bold: true, size: 7, color: { argb: 'FFFFFFFF' } };
+        let rowNo = firstDataRow, lastG = null, prevRow = null, count = 0;
+        const perDay = new Array(nD).fill(0);
+        for (const m of machines) {
+          const mine = m.v.filter(v => { const t = Date.UTC(+v.due_date.slice(0, 4), +v.due_date.slice(5, 7) - 1, +v.due_date.slice(8, 10)); return t >= start && t <= end; });
+          if (!mine.length) continue;
+          if (grpOf(m) !== lastG) { if (prevRow) closeGroup(ws, prevRow, last); band(ws, rowNo++, grpOf(m), last); lastG = grpOf(m); }
+          const row = ws.getRow(rowNo);
+          row.getCell(1).value = m.r0.machine_code; row.getCell(2).value = m.r0.machine_name; row.getCell(3).value = grpOf(m);
+          [1, 2, 3].forEach(c => { row.getCell(c).border = { bottom: thin, right: thin }; });
+          const days = new Map();
+          mine.forEach(v => { const n = Math.round((Date.UTC(+v.due_date.slice(0, 4), +v.due_date.slice(5, 7) - 1, +v.due_date.slice(8, 10)) - start) / 86400000); if (!days.has(n)) days.set(n, []); days.get(n).push(v); });
+          for (const [n, list] of days) { dayCell(row.getCell(4 + n), list); perDay[n]++; }
+          prevRow = rowNo; rowNo++; count++;
+        }
+        if (prevRow) closeGroup(ws, prevRow, last);
+        const tot = ws.getRow(rowNo + 1); tot.getCell(2).value = 'Machines serviced that day'; tot.getCell(2).font = { bold: true };
+        for (let n = 0; n < nD; n++) { const c = tot.getCell(4 + n); c.value = perDay[n] || null; c.font = { bold: true, size: 8 }; c.alignment = { horizontal: 'center' }; }
+        ws.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: nD > 40 ? 8 : 9 };
+        return count;
+      };
+
+      // 1. every day of the year
+      const ws = wb.addWorksheet('Whole Year', { views: [{ state: 'frozen', xSplit: 3, ySplit: 7 }] });
+      letterhead(ws, 'Every day of ' + year, KEY_NOTE);
+      grid(ws, year, 0, 11, 8, [5, 6, 7]);
+
+      // 2. one sheet per month
       for (let mo = 0; mo < 12; mo++) {
         const ms = year + '-' + String(mo + 1).padStart(2, '0');
-        const monthRows = rows.filter(r => r.due_date.slice(0, 7) === ms);
-        if (!monthRows.length) continue;
-        const nD = new Date(Date.UTC(year, mo + 1, 0)).getUTCDate();
-        const wm = wb.addWorksheet(MFULL[mo] + ' ' + year, { views: [{ state: 'frozen', xSplit: 3, ySplit: 3 }] });
-        wm.getCell('A1').value = `${title} - ${MFULL[mo]} ${year} (by day)`; wm.getCell('A1').font = { bold: true, size: 13, color: { argb: NAVY } };
-        wm.getRow(2).values = ['Code', 'Machine', 'Group']; wm.getRow(3).values = ['', '', ''];
-        for (let n = 1; n <= nD; n++) {
-          const wd = new Date(Date.UTC(year, mo, n)).getUTCDay();
-          wm.getRow(2).getCell(3 + n).value = DAYN[wd]; wm.getRow(3).getCell(3 + n).value = n; wm.getColumn(3 + n).width = 4.6;
-        }
-        wm.getColumn(1).width = 12; wm.getColumn(2).width = 34; wm.getColumn(3).width = 20;
-        head(wm, 2); head(wm, 3);
-        const mm = new Map();
-        monthRows.forEach(r => { if (!mm.has(r.machine_id)) mm.set(r.machine_id, { r0: r, v: [] }); mm.get(r.machine_id).v.push(r); });
-        const perDay = new Array(nD + 1).fill(0);
-        let rn = 4;
-        for (const m of mm.values()) {
-          const row = wm.getRow(rn++);
-          row.getCell(1).value = m.r0.machine_code; row.getCell(2).value = m.r0.machine_name; row.getCell(3).value = m.r0.machine_group || '';
-          const days = new Map();
-          m.v.forEach(v => { const n = parseInt(v.due_date.slice(8), 10); if (!days.has(n)) days.set(n, []); days.get(n).push(v); });
-          for (const [n, list] of days) {
-            list.sort((a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level]);
-            perDay[n]++;
-            const cell = row.getCell(3 + n);
-            cell.value = list.map(x => x.level).join('');
-            const overdue = list.some(x => (x.status === 'Planned' || x.status === 'In progress') && x.due_date < td);
-            const allDone = list.every(x => x.status === 'Done' || x.status === 'Skipped');
-            cell.fill = solid(overdue ? 'FFFFC7CE' : allDone ? 'FFC6EFCE' : FILL[list[0].level]);
-            cell.font = { bold: true, size: 9, color: { argb: overdue ? 'FF9C0006' : 'FF1F2937' } };
-            cell.alignment = { horizontal: 'center' };
-            cell.border = { top: thin, left: thin, bottom: thin, right: thin };
-          }
-        }
-        const tot = wm.getRow(rn + 1); tot.getCell(2).value = 'Machines serviced that day'; tot.font = { bold: true };
-        for (let n = 1; n <= nD; n++) tot.getCell(3 + n).value = perDay[n] || '';
-        wm.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
+        if (!rows.some(r => r.due_date.slice(0, 7) === ms)) continue;
+        const wm = wb.addWorksheet(MNAME[mo].charAt(0) + MNAME[mo].slice(1).toLowerCase() + ' ' + year, { views: [{ state: 'frozen', xSplit: 3, ySplit: 6 }] });
+        letterhead(wm, new Date(Date.UTC(year, mo, 1)).toLocaleString('en-GB', { month: 'long', timeZone: 'UTC' }) + ' ' + year, KEY_NOTE);
+        grid(wm, year, mo, mo, 7, [null, 5, 6]);
       }
 
-      // 2. flat list
-      const wl = wb.addWorksheet('PM Schedule', { views: [{ state: 'frozen', ySplit: 1 }] });
-      wl.columns = [
-        { header: 'Machine code', key: 'c', width: 14 }, { header: 'Machine', key: 'n', width: 36 }, { header: 'Group', key: 'g', width: 22 },
-        { header: 'Due date', key: 'd', width: 12 }, { header: 'Level', key: 'l', width: 16 }, { header: 'Status', key: 's', width: 12 },
-        { header: 'Done on', key: 'dn', width: 12 }, { header: 'Originally planned', key: 'o', width: 16 }, { header: 'Note', key: 'nt', width: 36 }
-      ];
-      head(wl, 1);
-      rows.forEach(r => wl.addRow({
-        c: r.machine_code, n: r.machine_name, g: r.machine_group || '', d: r.due_date, l: LEVEL_NAME[r.level] || r.level,
-        s: (r.status === 'Planned' && r.due_date < td) ? 'Overdue' : r.status,
-        dn: r.done_at ? new Date(r.done_at).toLocaleDateString('en-CA', { timeZone: TZ }) : '', o: r.orig_date !== r.due_date ? r.orig_date : '', nt: r.note || ''
-      }));
-      wl.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 9 } };
+      // list-style sheets share one pattern: letterhead, header on row 5, data from row 6, heavy line when the category changes
+      const listSheet = (name, sheetTitle, cols, lastGroupKey) => {
+        const w = wb.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 5 }] });
+        letterhead(w, sheetTitle, '');
+        cols.forEach((c, i) => { w.getColumn(i + 1).width = c[1]; w.getRow(5).getCell(i + 1).value = c[0]; });
+        head(w, 5, cols.length);
+        let rn = 6, prev = null;
+        return {
+          ws: w,
+          add: (vals, key) => {
+            const r = w.getRow(rn);
+            vals.forEach((v, i) => { const c = r.getCell(i + 1); c.value = v; c.border = { bottom: thin, right: thin }; });
+            if (lastGroupKey && key !== prev && prev !== null) for (let c = 1; c <= cols.length; c++) r.getCell(c).border = Object.assign({}, r.getCell(c).border, { top: heavy });
+            prev = key; rn++; return r;
+          },
+          next: () => rn
+        };
+      };
 
-      // 3. shutdown plan
-      const wsd = wb.addWorksheet('Shutdown Plan', { views: [{ state: 'frozen', ySplit: 1 }] });
-      wsd.columns = [
-        { header: 'Day', width: 6 }, { header: 'Date', width: 12 }, { header: 'Work package', width: 34 }, { header: 'Machine code', width: 14 },
-        { header: 'Machine', width: 36 }, { header: 'Status', width: 12 }
-      ];
-      head(wsd, 1);
+      const L1 = listSheet('PM Schedule', 'Visit list', [['Machine code', 14], ['Machine', 36], ['Group', 22], ['Due date', 12], ['Level', 16], ['Status', 12], ['Done on', 12], ['Originally planned', 16], ['Note', 36]], true);
+      rows.forEach(r => L1.add([
+        r.machine_code, r.machine_name, r.machine_group || 'Uncategorised', r.due_date, LEVEL_NAME[r.level] || r.level,
+        (r.status === 'Planned' && r.due_date < td) ? 'Overdue' : r.status,
+        r.done_at ? new Date(r.done_at).toLocaleDateString('en-CA', { timeZone: TZ }) : '', r.orig_date !== r.due_date ? r.orig_date : '', r.note || ''
+      ], r.machine_group || 'Uncategorised'));
+      L1.ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: 9 } };
+
+      const L2 = listSheet('Shutdown Plan', 'Shutdown plan', [['Day', 6], ['Date', 12], ['Work package', 34], ['Machine code', 14], ['Machine', 36], ['Status', 12]], true);
       rows.filter(r => r.level === 'S').sort((a, b) => (a.shutdown_day - b.shutdown_day) || a.machine_code.localeCompare(b.machine_code)).forEach(r =>
-        wsd.addRow([r.shutdown_day || '', r.due_date, (plans.plan.get(r.machine_id) || {}).shutdown_group || '', r.machine_code, r.machine_name, r.status]));
+        L2.add([r.shutdown_day || '', r.due_date, (plans.plan.get(r.machine_id) || {}).shutdown_group || '', r.machine_code, r.machine_name, r.status], r.shutdown_day || 0));
 
-      // 4. compliance for the year so far
       const sum = await buildSummary(orgId, year + '-01-01', year + '-12-31');
-      const wc = wb.addWorksheet('Compliance');
-      wc.columns = [{ header: 'Group', width: 28 }, { header: 'Planned', width: 11 }, { header: 'Due so far', width: 11 }, { header: 'Done', width: 10 }, { header: 'On time', width: 10 }, { header: 'Overdue', width: 10 }, { header: 'Done %', width: 10 }, { header: 'On time %', width: 11 }];
-      head(wc, 1);
-      const line = (n, x) => wc.addRow([n, x.planned, x.due, x.dueDone, x.dueOnTime, x.overdue, x.donePct == null ? '' : x.donePct / 100, x.onTimePct == null ? '' : x.onTimePct / 100]);
+      const L3 = listSheet('Compliance', 'Compliance', [['Group', 28], ['Planned', 11], ['Due so far', 11], ['Done', 10], ['On time', 10], ['Overdue', 10], ['Done %', 10], ['On time %', 11]], false);
+      const line = (n, x) => L3.add([n, x.planned, x.due, x.dueDone, x.dueOnTime, x.overdue, x.donePct == null ? '' : x.donePct / 100, x.onTimePct == null ? '' : x.onTimePct / 100]);
       sum.groups.forEach(g => line(g.group, g));
-      const tr = line('TOTAL', sum.total); tr.font = { bold: true };
-      wc.getColumn(7).numFmt = '0.0%'; wc.getColumn(8).numFmt = '0.0%';
+      line('TOTAL', sum.total).font = { bold: true };
+      L3.ws.getColumn(7).numFmt = '0.0%'; L3.ws.getColumn(8).numFmt = '0.0%';
       if (sum.overdueList.length) {
-        wc.addRow([]); const h = wc.addRow(['Overdue visits (oldest first)', 'Code', 'Level', 'Due date', 'Days late']); h.font = { bold: true };
-        sum.overdueList.forEach(o => wc.addRow([o.machine, o.code, o.levelName, o.dueDate, o.daysLate]));
+        L3.add([]); const hh = L3.add(['Overdue visits (oldest first)', 'Code', 'Level', 'Due date', 'Days late']); hh.font = { bold: true };
+        sum.overdueList.forEach(o => L3.add([o.machine, o.code, o.levelName, o.dueDate, o.daysLate]));
       }
 
-      // 5. key
-      const wk = wb.addWorksheet('Key');
-      wk.columns = [{ width: 10 }, { width: 70 }];
-      wk.addRow(['Letter', 'Meaning']); head(wk, 1);
-      Object.keys(LEVEL_NAME).forEach(k => { const r = wk.addRow([k, LEVEL_NAME[k]]); r.getCell(1).fill = solid(FILL[k]); r.getCell(1).alignment = { horizontal: 'center' }; });
-      wk.addRow(['Green', 'Done']).getCell(1).fill = solid('FFC6EFCE');
-      wk.addRow(['Red', 'Overdue']).getCell(1).fill = solid('FFFFC7CE');
+      const K = listSheet('Key', 'Key', [['Letter', 12], ['Meaning', 60]], false);
+      Object.keys(LEVEL_NAME).forEach(k => { const r = K.add([k, LEVEL_NAME[k]]); r.getCell(1).fill = solid(FILL[k]); r.getCell(1).alignment = { horizontal: 'center' }; });
+      K.add(['Green', 'Done']).getCell(1).fill = solid('FFC6EFCE');
+      K.add(['Red', 'Overdue']).getCell(1).fill = solid('FFFFC7CE');
 
-      const safe = String(org && org.name || 'CMMS').replace(/[^A-Za-z0-9]+/g, '_');
+      const safe = String(org.name || 'CMMS').replace(/[^A-Za-z0-9]+/g, '_');
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename="${safe}_PM_Schedule_${year}.xlsx"`);
       await wb.xlsx.write(res);
