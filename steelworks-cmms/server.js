@@ -234,7 +234,7 @@ async function compressAttachmentPhoto(buffer) {
   return compressImage(buffer, 1400, 80);
 }
 
-app.use(express.json());
+app.use(express.json({ limit: '8mb' }));  // PM import files are a few hundred KB
 app.use(session({
   secret: process.env.SESSION_SECRET || 'steelworks-dev-secret-change-me',
   resave: false,
@@ -963,7 +963,8 @@ app.post('/api/auth/login', async (req, res) => {
     const permissions = req.session.user.organizationId ? await getUserPermissions(req.session.user) : [];
     if (organizationId) res.cookie('orb_org', orgCode.trim().toUpperCase(), { maxAge: 365 * 24 * 3600 * 1000, sameSite: 'lax' });
     const boardsAccess = req.session.user.organizationId ? await userHasBoardsAccess(user.id) : false;
-    res.json({ ...req.session.user, permissions, boardsAccess });
+    const performanceAccess = req.session.user.organizationId ? await userHasPerformanceAccess(user.id) : false;
+    res.json({ ...req.session.user, permissions, boardsAccess, performanceAccess });
   } catch (e) { res.status(500).json({ error: 'Login failed: ' + e.message }); }
 });
 
@@ -972,7 +973,8 @@ app.get('/api/auth/me', async (req, res) => {
   try {
     const permissions = req.session.user.organizationId ? await getUserPermissions(req.session.user) : [];
     const boardsAccess = req.session.user.organizationId ? await userHasBoardsAccess(req.session.user.id) : false;
-    res.json({ ...req.session.user, permissions, boardsAccess });
+    const performanceAccess = req.session.user.organizationId ? await userHasPerformanceAccess(req.session.user.id) : false;
+    res.json({ ...req.session.user, permissions, boardsAccess, performanceAccess });
   } catch (e) { res.json(req.session.user); } // fail open on the permissions lookup - user object itself is still valid
 });
 
@@ -1165,7 +1167,7 @@ app.get('/api/super-admin/organizations/:id/users', requireRole('Super Admin'), 
   try {
     const org = await dbGet('SELECT id FROM organizations WHERE id = $1', [req.params.id]);
     if (!org) return res.status(404).json({ error: 'Organization not found' });
-    const rows = await dbAll('SELECT id, name, username, role, boards_access, custom_role_id, created_at FROM users WHERE organization_id = $1 ORDER BY created_at ASC', [req.params.id]);
+    const rows = await dbAll('SELECT id, name, username, role, boards_access, performance_access, custom_role_id, created_at FROM users WHERE organization_id = $1 ORDER BY created_at ASC', [req.params.id]);
     res.json(rows.map(toUserJSON));
   } catch (e) { res.status(500).json({ error: 'Could not list users: ' + e.message }); }
 });
@@ -1181,6 +1183,20 @@ app.put('/api/super-admin/users/:id/boards-access', requireRole('Super Admin'), 
     res.json({ ok: true, boardsAccess: !!req.body.enabled });
   } catch (e) { res.status(500).json({ error: 'Could not update Boards access: ' + e.message }); }
 });
+// Performance (employee performance) works the same way: hidden for everyone
+// until the Super Admin switches it on for an individual user.
+app.put('/api/super-admin/users/:id/performance-access', requireRole('Super Admin'), async (req, res) => {
+  try {
+    const user = await dbGet('SELECT id, organization_id FROM users WHERE id = $1', [req.params.id]);
+    if (!user || !user.organization_id) return res.status(404).json({ error: 'User not found' });
+    await dbRun('UPDATE users SET performance_access = $1 WHERE id = $2', [req.body.enabled ? 1 : 0, user.id]);
+    res.json({ ok: true, performanceAccess: !!req.body.enabled });
+  } catch (e) { res.status(500).json({ error: 'Could not update Performance access: ' + e.message }); }
+});
+async function userHasPerformanceAccess(userId) {
+  const r = await dbGet('SELECT performance_access FROM users WHERE id = $1', [userId]);
+  return !!r && r.performance_access === 1;
+}
 async function userHasBoardsAccess(userId) {
   const r = await dbGet('SELECT boards_access FROM users WHERE id = $1', [userId]);
   return !!r && r.boards_access === 1;
@@ -2545,6 +2561,7 @@ app.delete('/api/staff/:id', requireStaffManager, async (req, res) => {
 // every person on the job (not split), so they show time on task, not payroll.
 app.get('/api/metrics/staff', requirePermission('view_reports'), async (req, res) => {
   try {
+    if (!(await userHasPerformanceAccess(req.session.user.id))) return res.status(403).json({ error: 'Performance is not enabled for your account' });
     const orgId = req.session.user.organizationId;
     const from = new Date(req.query.from), to = new Date(req.query.to);
     if (isNaN(from.getTime()) || isNaN(to.getTime()) || to <= from) return res.status(400).json({ error: 'Invalid date range' });
@@ -2674,8 +2691,19 @@ app.get('/api/dashboard', async (req, res) => {
     const recentLogs = recentRows.map(toLogJSON);
     const machinesAttention = attentionRows.map(toMachineJSON);
 
+    // When the PM schedule is loaded it drives the PM cards; otherwise the old next-PM-date numbers are used.
+    let pmDueSoonFinal = toInt(pmDueSoonRow.c), pmOverdueFinal = null, pmComplianceFinal = { onSchedule: toInt(compliance.onschedule), overdue: toInt(compliance.overdue) };
+    try {
+      const pmn = await app.locals.pm.dashboardNumbers(orgId);
+      if (pmn.total > 0) {
+        pmDueSoonFinal = pmn.dueSoon; pmOverdueFinal = pmn.overdue;
+        pmComplianceFinal = { onSchedule: Math.max(0, pmn.machines - pmn.overdueMachines), overdue: pmn.overdueMachines };
+      }
+    } catch (pmErr) { console.error('pm dashboard numbers failed:', pmErr.message); }
+
     res.json({
-      pmDueSoon: toInt(pmDueSoonRow.c),
+      pmDueSoon: pmDueSoonFinal,
+      pmOverdue: pmOverdueFinal,
       totalMachines: toInt(totalMachinesRow.c),
       machinesDown: machinesDownList.length,
       machinesDownList,
@@ -2683,7 +2711,7 @@ app.get('/api/dashboard', async (req, res) => {
       pendingLogs: toInt(pendingLogsRow.c),
       awaitingReview: toInt(awaitingReviewRow.c),
       weeklyTrends,
-      pmCompliance: { onSchedule: toInt(compliance.onschedule), overdue: toInt(compliance.overdue) },
+      pmCompliance: pmComplianceFinal,
       recentLogs,
       machinesAttention,
       findings
@@ -2979,7 +3007,9 @@ app.get('/api/reports/summary', async (req, res) => {
       };
     }).sort((a, b) => b.hours - a.hours).slice(0, 60);
 
-    res.json({ fromDate, toDate, totals, groups, topMachines, staff, parts, breakdowns });
+    let pm = null;
+    try { pm = await app.locals.pm.summary(orgId, fromDate, toDate); } catch (pmErr) { console.error('pm summary failed:', pmErr.message); }
+    res.json({ fromDate, toDate, totals, groups, topMachines, staff, parts, breakdowns, pm });
   } catch (e) { res.status(500).json({ error: 'Could not load report summary: ' + e.message }); }
 });
 
@@ -3146,7 +3176,7 @@ function toLogJSON(row) {
   };
 }
 function toUserJSON(row) {
-  return { id: row.id, name: row.name, username: row.username, role: row.role, customRoleId: row.custom_role_id || null, boardsAccess: row.boards_access === 1, createdAt: row.created_at };
+  return { id: row.id, name: row.name, username: row.username, role: row.role, customRoleId: row.custom_role_id || null, boardsAccess: row.boards_access === 1, performanceAccess: row.performance_access === 1, createdAt: row.created_at };
 }
 function toCustomRoleJSON(row) {
   let permissions = [];
@@ -3204,6 +3234,7 @@ app.get('*', (req, res) => {
 // that could do this at plain module-load time).
 async function start() {
   await db.ensureSchema();
+  await dbRun('ALTER TABLE users ADD COLUMN IF NOT EXISTS performance_access INTEGER NOT NULL DEFAULT 0');
   await app.locals.pm.ensureSchema();
   await bootstrapDefaultOrganization();
   await bootstrapOrgAdmin();
