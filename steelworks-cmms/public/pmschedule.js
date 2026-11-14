@@ -26,9 +26,11 @@
     $('pmTabDue').style.display = t === 'due' ? '' : 'none';
     $('pmTabCompliance').style.display = t === 'compliance' ? '' : 'none';
     $('pmTabShutdown').style.display = t === 'shutdown' ? '' : 'none';
+    $('pmTabChart').style.display = t === 'chart' ? '' : 'none';
     if (t === 'due') loadDue();
     if (t === 'compliance') loadSummary();
     if (t === 'shutdown') loadShutdown();
+    if (t === 'chart') loadChart(!chartData);
   }
 
   window.loadPmPage = async function () {
@@ -36,6 +38,7 @@
       try {
         const g = await apiGet('/pm/groups');
         $('pmGroup').innerHTML = '<option value="">All groups</option>' + g.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+        $('pmChGroup').innerHTML = '<option value="">All groups</option>' + g.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
         groupsLoaded = true;
       } catch (e) { /* list still works without the group filter */ }
     }
@@ -236,6 +239,101 @@
     return 0;
   }
 
+
+  // ---------- full-year chart (machines down, weeks across) ----------
+  const RANK = { S: 6, A: 5, H: 4, Q: 3, M: 2, W: 1 };
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  let chartData = null, chartSeq = 0;
+  async function loadChart(refetch) {
+    const my = ++chartSeq;
+    if (refetch || !chartData) {
+      $('pmChart').innerHTML = '<div class="empty-state"><div class="big">Loading...</div></div>';
+      const qs = new URLSearchParams();
+      if ($('pmChYear').value) qs.set('year', $('pmChYear').value);
+      if ($('pmChGroup').value) qs.set('group', $('pmChGroup').value);
+      let d;
+      try { d = await apiGet('/pm/chart?' + qs.toString()); }
+      catch (e) { if (my === chartSeq) $('pmChart').innerHTML = `<div class="empty-state"><div class="big">Could not load chart</div><div>${esc(e.message)}</div></div>`; return; }
+      if (my !== chartSeq) return;
+      chartData = d;
+      if (d.years && d.years.length) $('pmChYear').innerHTML = d.years.map(v => `<option value="${v}" ${v === d.year ? 'selected' : ''}>${v}</option>`).join('');
+    }
+    renderChart();
+  }
+  function renderChart() {
+    const d = chartData; if (!d) return;
+    if (!d.machines.length) {
+      $('pmChart').innerHTML = `<div class="empty-state"><div class="big">No PM visits for ${esc(d.year)}</div>${isManagement() ? FILE_BTN : ''}</div>`;
+      return;
+    }
+    const q = $('pmChSearch').value.trim().toLowerCase();
+    const hideW = $('pmChLevel').value === 'nw';
+    const td = d.today;
+    const jan1 = new Date(d.year + '-01-01T00:00:00Z');
+    const first = new Date(jan1.getTime() - ((jan1.getUTCDay() + 6) % 7) * 86400000);
+    const nW = Math.floor((new Date(d.year + '-12-31T00:00:00Z') - first) / 86400000 / 7) + 1;
+    const weekStart = w => new Date(first.getTime() + w * 7 * 86400000);
+    const curW = td.slice(0, 4) === String(d.year) ? Math.floor((new Date(td + 'T00:00:00Z') - first) / 86400000 / 7) : -1;
+    // month header cells
+    let mh = '<th class="pmc-name" rowspan="2">Machine</th>', run = 0, lastM = -1;
+    const spans = [];
+    for (let w = 0; w < nW; w++) {
+      const ds = weekStart(w), m = ds.getUTCFullYear() === d.year ? ds.getUTCMonth() : (ds.getUTCFullYear() < d.year ? 0 : 11);
+      if (m !== lastM) { spans.push({ m, n: 1 }); lastM = m; } else spans[spans.length - 1].n++;
+    }
+    mh += spans.map(s => `<th colspan="${s.n}" class="pmc-mon">${MON[s.m]}</th>`).join('');
+    let wh = '';
+    for (let w = 0; w < nW; w++) wh += `<th class="pmc-wk${w === curW ? ' pmc-now' : ''}">${weekStart(w).getUTCDate()}</th>`;
+    let body = '', shown = 0, lastG = null;
+    d.machines.forEach((m, mi) => {
+      if (q && !(m.name + ' ' + m.code).toLowerCase().includes(q)) return;
+      const wk = {};
+      m.v.forEach(v => {
+        if (hideW && v[2] === 'W') return;
+        const w = Math.floor((new Date(v[1] + 'T00:00:00Z') - first) / 86400000 / 7);
+        (wk[w] = wk[w] || []).push(v);
+      });
+      if (m.group !== lastG) { body += `<tr class="pmc-grp"><td colspan="${nW + 1}">${esc(m.group)}</td></tr>`; lastG = m.group; }
+      let tds = '';
+      for (let w = 0; w < nW; w++) {
+        const l = wk[w];
+        if (!l) { tds += `<td class="pmc${w === curW ? ' pmc-now' : ''}"></td>`; continue; }
+        l.sort((a, b) => RANK[b[2]] - RANK[a[2]]);
+        const open = l.filter(x => x[3] === 'Planned' || x[3] === 'In progress');
+        const od = open.some(x => x[1] < td), dn = l.every(x => x[3] === 'Done' || x[3] === 'Skipped');
+        tds += `<td class="pmc pmc-c pmc-${l[0][2]}${od ? ' pmc-od' : dn ? ' pmc-dn' : ''}" data-pmcell="${mi}:${w}">${l.map(x => x[2]).join('')}</td>`;
+      }
+      body += `<tr><td class="pmc-name"><b>${esc(m.code)}</b> ${esc(m.name)}</td>${tds}</tr>`;
+      shown++;
+    });
+    d._first = first;
+    $('pmChart').innerHTML = `
+      <div class="pmc-legend">${['W', 'M', 'Q', 'H', 'A', 'S'].map(k => `<span class="pmc-key pmc-${k}">${k}</span>${esc({ W: 'Weekly', M: 'Monthly', Q: 'Quarterly', H: 'Half-yearly', A: 'Annual', S: 'Shutdown' }[k])}`).join(' ')}
+        <span class="pmc-key pmc-dn">&#10003;</span>Done <span class="pmc-key pmc-od">!</span>Overdue</div>
+      <div id="pmChDetail" class="pmc-detail" style="display:none;"></div>
+      ${shown ? `<div class="pmc-wrap"><table class="pmc-table"><thead><tr>${mh}</tr><tr>${wh}</tr></thead><tbody>${body}</tbody></table></div>` : '<div class="empty-state"><div class="big">No machines match</div></div>'}`;
+  }
+  document.addEventListener('click', (e) => {
+    const c = e.target.closest('[data-pmcell]');
+    if (!c || !chartData) return;
+    const [mi, w] = c.dataset.pmcell.split(':').map(Number);
+    const m = chartData.machines[mi];
+    const ws = chartData._first.getTime() + w * 7 * 86400000;
+    const list = m.v.filter(v => Math.floor((new Date(v[1] + 'T00:00:00Z').getTime() - chartData._first.getTime()) / 86400000 / 7) === w);
+    const names = { W: 'Weekly', M: 'Monthly', Q: 'Quarterly', H: 'Half-yearly', A: 'Annual', S: 'Annual (shutdown)' };
+    const box = $('pmChDetail');
+    box.innerHTML = `<b>${esc(m.code)} ${esc(m.name)}</b> <span class="hint" style="margin:0;">${esc(m.group)}</span>` +
+      list.map(v => `<div>${esc(fmt(v[1]))} &middot; ${esc(names[v[2]] || v[2])} &middot; <b>${esc(v[3] === 'Planned' && v[1] < chartData.today ? 'Overdue' : v[3])}</b></div>`).join('') +
+      '<div class="hint" style="margin:4px 0 0;">To log a visit, open it from the Due tab.</div>';
+    box.style.display = '';
+    box.scrollIntoView({ block: 'nearest' });
+  });
+  function downloadXlsx() {
+    const y = (chartData && chartData.year) || '';
+    const g = $('pmChGroup') ? $('pmChGroup').value : '';
+    window.location.href = '/api/pm/export?' + new URLSearchParams(Object.assign(y ? { year: y } : {}, g ? { group: g } : {})).toString();
+  }
+
   // ---------- events ----------
   document.addEventListener('click', async (e) => {
     const t = e.target.closest('[data-pmact]');
@@ -244,6 +342,7 @@
     if (!t || t.tagName === 'INPUT') return;
     const act = t.dataset.pmact, id = parseInt(t.dataset.id, 10);
     try {
+      if (act === 'xlsx') { downloadXlsx(); return; }
       if (act === 'log') { const r = cache[id]; if (r) await logPm(r); }
       else if (act === 'viewlog') { const r = cache[id]; if (r && r.logId && window.openLogDetail) { window._logDetailBackView = 'pm'; openLogDetail(r.logId); } }
       else if (act === 'move') inlineForm(id, 'move');
@@ -289,7 +388,7 @@
       (r.removed ? ', ' + r.removed + ' old planned visits replaced' : '') +
       (r.unmatched.length ? '. ' + r.unmatched.length + ' machine codes not found in your register' : ''), true);
     if (r.unmatched.length) console.warn('PM import - machine codes not found:', r.unmatched.join(', '));
-    groupsLoaded = false; await window.loadPmPage();
+    groupsLoaded = false; chartData = null; await window.loadPmPage();
   }
   document.addEventListener('change', async (e) => {
     const t = e.target;
@@ -309,11 +408,14 @@
     }
     if (['pmScope', 'pmGroup', 'pmLevel'].includes(t.id)) loadDue();
     if (t.id === 'pmPeriod') loadSummary();
+    if (t.id === 'pmChYear' || t.id === 'pmChGroup') loadChart(true);
+    if (t.id === 'pmChLevel') renderChart();
     if (t.id === 'pmShutYear') { shutOpen = {}; loadShutdown(); }
   });
   let deb;
   document.addEventListener('input', (e) => {
     if (e.target.id === 'pmSearch') { clearTimeout(deb); deb = setTimeout(loadDue, 300); }
+    if (e.target.id === 'pmChSearch') { clearTimeout(deb); deb = setTimeout(renderChart, 250); }
   });
   document.addEventListener('click', (e) => {
     if (e.target.id === 'pmClear') {
