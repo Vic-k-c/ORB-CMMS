@@ -16,6 +16,8 @@
   function daysBetween(a, b) { return Math.round((new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86400000); }
   const esc = s => escapeHtml(s == null ? '' : String(s));
   const canAct = () => hasPermission('submit_logs');
+  // A real file control (tapped directly) works in every phone browser; no accept filter so .json is never greyed out
+  const FILE_BTN = '<p><label class="btn-primary pm-file-btn">Choose PM file (.json)<input type="file" class="pm-file-input"></label></p>';
 
   // ---------- tabs ----------
   function setTab(t) {
@@ -60,7 +62,7 @@
     if (!d.rows.length) {
       $('pmList').innerHTML = `<div class="empty-state"><div class="big">${$('pmScope').value === 'overdue' ? 'Nothing overdue' : 'No PM visits found'}</div>
         <div>${filtersActive() ? 'Try clearing the filters.' : 'If the schedule has never been loaded, a manager can import it.'}</div>
-        ${isManagement() ? '<p><button type="button" class="btn-primary" data-pmact="import">Import PM schedule</button></p>' : ''}</div>`;
+        ${isManagement() ? FILE_BTN : ''}</div>`;
       return;
     }
     const today = d.today; window._pmToday = d.today;
@@ -192,7 +194,7 @@
       $('pmShutYear').innerHTML = d.years.map(v => `<option value="${v}" ${String(v) === year ? 'selected' : ''}>${v}</option>`).join('');
     }
     if (!d.rows.length) {
-      $('pmShutdown').innerHTML = `<div class="empty-state"><div class="big">No shutdown plan loaded${d.years && d.years.length ? ' for ' + esc(year) : ''}</div>${isManagement() ? '<p><button type="button" class="btn-primary" data-pmact="import">Import PM schedule</button></p>' : ''}</div>`;
+      $('pmShutdown').innerHTML = `<div class="empty-state"><div class="big">No shutdown plan loaded${d.years && d.years.length ? ' for ' + esc(year) : ''}</div>${isManagement() ? FILE_BTN : ''}</div>`;
       return;
     }
     const total = d.rows.length, done = d.rows.filter(r => r.status === 'Done').length;
@@ -269,7 +271,7 @@
   // The Import button opens the phone / PC file chooser directly
   function pickImportFile() {
     const inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = '.json,application/json'; inp.style.display = 'none';
+    inp.type = 'file'; inp.style.display = 'none';
     inp.addEventListener('change', async () => {
       const f = inp.files && inp.files[0];
       inp.remove();
@@ -291,9 +293,9 @@
   }
   document.addEventListener('change', async (e) => {
     const t = e.target;
-    if (t.id === 'pmImportFile') {
+    if (t.id === 'pmImportFile' || t.classList.contains('pm-file-input')) {
       const f = t.files && t.files[0]; t.value = '';
-      if (f) { try { await doImport(f); } catch (err) { showToast(err.message); } }
+      if (f) { showToast('Importing ' + f.name + '...'); try { await doImport(f); } catch (err) { showToast(err.message); } }
       return;
     }
     if (t.matches('input[data-pmact="tick"]')) {
