@@ -824,6 +824,7 @@
         </select>
         <input type="text" id="pmSearch" placeholder="Search machine name or code..." autocomplete="off">
         <button type="button" class="btn-ghost" id="pmClear">Clear</button>
+        <button type="button" class="btn-ghost" data-pmact="pack" data-kind="due" title="Excel work pack with tick boxes, to print as a paper backup">Print pack (Excel)</button>
         <span class="filter-count" id="pmCount"></span>
       </div>
       <div id="pmList"></div>
@@ -859,6 +860,7 @@
       <div class="search-bar pm-filters">
         <select id="pmShutYear"></select>
         <button type="button" class="btn-ghost" data-pmact="xlsx">Download Excel</button>
+        <button type="button" class="btn-primary" data-pmact="pack" data-kind="shutdown">Print shutdown pack</button>
         <span class="hint" style="margin:0;">Annual service for the machines in the plant shutdown. Tick each machine when its day's work is done.</span>
       </div>
       <div id="pmShutdown"></div>
@@ -1094,4 +1096,4 @@
 <script src="/kanban.js"></script>
 <script src="/pmschedule.js"></script>
 </body>
-</html>
+          </html>
