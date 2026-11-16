@@ -634,6 +634,227 @@ module.exports = function (app, h) {
     } catch (e) { if (!res.headersSent) res.status(500).json({ error: 'Could not build Excel file: ' + e.message }); else res.end(); }
   });
 
+  // ---------- printable work pack (Excel): Gantt overview + one list per day ----------
+  // scope: today | week | range | shutdown ; optional group, level, from, to, year, overdue=0
+  app.get('/api/pm/pack', requirePermission('view_machines'), async (req, res) => {
+    try {
+      const orgId = req.session.user.organizationId;
+      const org = (await dbGet('SELECT * FROM organizations WHERE id = $1', [orgId])) || {};
+      const td = today();
+      const scope = ['today', 'week', 'range', 'shutdown'].includes(req.query.scope) ? req.query.scope : 'today';
+      const group = String(req.query.group || '').trim();
+      const level = String(req.query.level || '').trim();
+      const q = String(req.query.q || '').trim().toLowerCase();
+      const withOverdue = String(req.query.overdue || '1') !== '0' && scope !== 'shutdown';
+      let from = td, to = td;
+      if (scope === 'week') to = addDaysStr(td, 6);
+      if (scope === 'range') {
+        if (isDate(req.query.from)) from = req.query.from;
+        to = isDate(req.query.to) ? req.query.to : addDaysStr(from, 6);
+        if (to < from) to = from;
+        if (Math.round((new Date(to) - new Date(from)) / 86400000) > 92) to = addDaysStr(from, 92);
+      }
+      const where = ['p.organization_id = $1'];
+      const params = [orgId];
+      const P = v => { params.push(v); return '$' + params.length; };
+      if (scope === 'shutdown') {
+        const yrs = await dbAll(`SELECT DISTINCT EXTRACT(YEAR FROM due_date)::int AS y FROM pm_schedule WHERE organization_id = $1 AND level = 'S' ORDER BY 1`, [orgId]);
+        const year = pickYear(yrs.map(r => r.y), req);
+        where.push(`p.level = 'S'`, `p.due_date BETWEEN ${P(year + '-01-01')}::date AND ${P(year + '-12-31')}::date`);
+      } else {
+        where.push(`p.level <> 'S'`);
+        const win = `p.due_date BETWEEN ${P(from)}::date AND ${P(to)}::date`;
+        where.push(withOverdue ? `(${win} OR (p.status IN ('Planned','In progress') AND p.due_date < ${P(from)}::date))` : win);
+      }
+      if (group) where.push(`m.department = ${P(group)}`);
+      if (LEVEL_NAME[level] && scope !== 'shutdown') where.push(`p.level = ${P(level)}`);
+      if (q) where.push(`(LOWER(m.name) LIKE ${P('%' + q + '%')} OR LOWER(m.code) LIKE ${P('%' + q + '%')})`);
+      const [raw, plans, staff] = await Promise.all([
+        dbAll(`${SELECT_ROW} WHERE ${where.join(' AND ')} ORDER BY p.due_date, m.department, m.location, m.code LIMIT 1500`, params),
+        loadPlans(orgId),
+        dbAll(`SELECT name, title, discipline FROM staff WHERE organization_id = $1 AND COALESCE(active,1) = 1 ORDER BY name`, [orgId]).catch(() => [])
+      ]);
+      let visits = raw.map(r => Object.assign(toJSON(r, plans), { shutdownGroup: (plans.plan.get(r.machine_id) || {}).shutdown_group || '' }));
+      const overdue = scope === 'shutdown' ? [] : visits.filter(v => v.dueDate < from && (v.status === 'Planned' || v.status === 'In progress'));
+      visits = visits.filter(v => !(scope !== 'shutdown' && v.dueDate < from));
+      // day list
+      let days = [];
+      if (scope === 'shutdown') {
+        const set = new Set(visits.map(v => v.dueDate)); days = Array.from(set).sort();
+      } else { for (let d = from; d <= to; d = addDaysStr(d, 1)) days.push(d); }
+      if (scope === 'shutdown' && !days.length) return res.status(404).json({ error: 'No shutdown plan found' });
+
+      const wb = new ExcelJS.Workbook();
+      wb.creator = (org.name || 'CMMS') + ' - CMMS';
+      const NAVY = 'FF0B2545', BAND = 'FF1F3A5F';
+      const solid = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+      const thin = { style: 'thin', color: { argb: 'FF7F7F7F' } };
+      const heavy = { style: 'medium', color: { argb: NAVY } };
+      const box = { top: thin, left: thin, bottom: thin, right: thin };
+      const FILL = { W: 'FFDDEBF7', M: 'FFBDD7EE', Q: 'FFC6E0B4', H: 'FFFFE699', A: 'FFF4B183', S: 'FFD9C3E8' };
+      const lh = h.letterhead || {};
+      const brandLines = String(lh.brandText ? lh.brandText(org) : (org.name || '')).split('\n').map(x => x.trim()).filter(Boolean).slice(0, 2);
+      const DOW = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+      const ddmmyyyy = s => s.slice(8) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4);
+      const dow = s => DOW[new Date(s + 'T00:00:00Z').getUTCDay()];
+      const title = scope === 'shutdown' ? 'PLANT SHUTDOWN MAINTENANCE PLAN ' + days[0].slice(0, 4)
+        : scope === 'today' ? 'PM WORK PACK - ' + ddmmyyyy(from) : 'PM WORK PACK - ' + ddmmyyyy(from) + ' to ' + ddmmyyyy(to);
+      const docLine = ['Document No. ' + (org.doc_no_excel || 'N/A'), 'Printed: ' + ddmmyyyy(td), 'Approved By: ' + (org.approved_by || 'N/A')].join('     ');
+      const setup = (ws, lastCol, titleRows) => {
+        ws.pageSetup = { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.5, header: 0.2, footer: 0.2 } };
+        ws.printOptions = { horizontalCentered: true };
+        if (titleRows) ws.pageSetup.printTitlesRow = titleRows;
+        ws.headerFooter = { oddFooter: '&L' + (org.name || '') + ' - ' + title + '&CPage &P of &N&RPrinted ' + ddmmyyyy(td) };
+      };
+      const letterhead = (ws, sub, lastCol) => {
+        [1, 2, 3].forEach(i => { ws.getRow(i).height = 22; });
+        if (lh.addLogo) { try { lh.addLogo(wb, ws, org); } catch (e) { /* optional */ } }
+        const texts = brandLines.concat([sub]).slice(-3);
+        texts.forEach((t, i) => { const c = ws.getRow(i + 1).getCell(3); c.value = t; c.font = i === texts.length - 1 ? { bold: true, size: 13, color: { argb: NAVY } } : { bold: i === 0, size: i === 0 ? 14 : 10, color: { argb: NAVY } }; c.alignment = { vertical: 'middle' }; });
+        const n = ws.getRow(4).getCell(1); n.value = docLine; n.font = { italic: true, size: 9 };
+      };
+      const hdr = (ws, rowNo, labels) => {
+        const r = ws.getRow(rowNo); r.height = 30;
+        labels.forEach((l, i) => { const c = r.getCell(i + 1); c.value = l; c.fill = solid(NAVY); c.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12 }; c.alignment = { vertical: 'middle', horizontal: i === 2 ? 'left' : 'center', wrapText: true }; c.border = box; });
+      };
+
+      // ---------- sheet 1: overview (Gantt) ----------
+      const keyOf = v => scope === 'shutdown' ? (v.shutdownGroup || v.group) : v.group;
+      const keys = []; visits.forEach(v => { const k = keyOf(v); if (!keys.includes(k)) keys.push(k); });
+      const G = wb.addWorksheet(scope === 'shutdown' ? 'Shutdown Plan' : 'Overview', { views: [{ state: 'frozen', ySplit: 7, xSplit: 3 }] });
+      const nDay = days.length, lastG = 4 + nDay;
+      G.getColumn(1).width = 34; G.getColumn(2).width = 60; G.getColumn(3).width = 9; G.getColumn(4).width = 9;
+      for (let i = 0; i < nDay; i++) G.getColumn(5 + i).width = nDay > 14 ? 5 : 9;
+      letterhead(G, title, lastG);
+      G.getRow(6).getCell(5).value = scope === 'shutdown' ? 'LABOUR DISTRIBUTION PLAN (people per day)' : 'VISITS PER DAY';
+      G.mergeCells(6, 5, 6, lastG);
+      G.getRow(6).getCell(5).font = { bold: true, size: 12, color: { argb: NAVY } }; G.getRow(6).getCell(5).alignment = { horizontal: 'center' };
+      const gh = ['Machine / Equipment group', 'Maintenance tasks', 'Visits', 'Est. hours'];
+      days.forEach(d => gh.push(dow(d) + '\n' + d.slice(8) + '/' + d.slice(5, 7)));
+      hdr(G, 7, gh);
+      G.getRow(7).height = 34;
+      let gr = 8; const dayTot = days.map(() => 0), dayHrs = days.map(() => 0);
+      keys.forEach(k => {
+        const vs = visits.filter(v => keyOf(v) === k);
+        const grp = scope === 'shutdown' ? plans.groups.find(x => x.name === k) : null;
+        const taskTxt = grp && grp.tasks ? grp.tasks : Array.from(new Set(vs.flatMap(v => v.tasks))).slice(0, 6).join('; ');
+        const hrs = vs.reduce((a, v) => a + (v.hours || 0), 0);
+        const r = G.getRow(gr++); r.height = 36;
+        [k, taskTxt, vs.length, Math.round(hrs * 10) / 10].forEach((x, i) => { const c = r.getCell(i + 1); c.value = x; c.border = box; c.alignment = { vertical: 'middle', wrapText: i < 2, horizontal: i < 2 ? 'left' : 'center' }; c.font = { size: 10, bold: i === 0 }; });
+        days.forEach((d, i) => {
+          const c = r.getCell(5 + i); c.border = box; c.alignment = { horizontal: 'center', vertical: 'middle' };
+          const here = vs.filter(v => v.dueDate === d);
+          if (here.length) {
+            let n = here.length;
+            if (grp && grp.manpower && grp.manpower[i] != null) n = grp.manpower[i];
+            c.value = n; c.fill = solid(scope === 'shutdown' ? 'FFD9C3E8' : FILL[here.sort((a, b) => LEVEL_RANK[b.level] - LEVEL_RANK[a.level])[0].level]); c.font = { bold: true, size: 11 };
+            dayTot[i] += n; dayHrs[i] += here.reduce((a, v) => a + (v.hours || 0), 0);
+          }
+        });
+      });
+      const tr = G.getRow(gr++); tr.height = 22;
+      tr.getCell(4).value = scope === 'shutdown' ? 'TOTAL MANPOWER' : 'TOTAL VISITS';
+      tr.getCell(4).alignment = { horizontal: 'right' }; G.mergeCells(gr - 1, 1, gr - 1, 4);
+      tr.getCell(1).value = tr.getCell(4).value; tr.getCell(1).alignment = { horizontal: 'right' };
+      days.forEach((d, i) => { const c = tr.getCell(5 + i); c.value = dayTot[i]; c.alignment = { horizontal: 'center' }; });
+      for (let c = 1; c <= lastG; c++) { const x = tr.getCell(c); x.font = { bold: true, size: 11 }; x.border = { top: heavy, bottom: heavy, left: thin, right: thin }; x.fill = solid('FFF2F2F2'); }
+      if (scope !== 'shutdown') {
+        const hr = G.getRow(gr++); G.mergeCells(gr - 1, 1, gr - 1, 4);
+        hr.getCell(1).value = 'EST. HOURS'; hr.getCell(1).alignment = { horizontal: 'right' };
+        days.forEach((d, i) => { hr.getCell(5 + i).value = Math.round(dayHrs[i] * 10) / 10; hr.getCell(5 + i).alignment = { horizontal: 'center' }; });
+        for (let c = 1; c <= lastG; c++) { const x = hr.getCell(c); x.font = { bold: true, size: 10 }; x.border = box; }
+      }
+      gr++;
+      if (overdue.length) { const r = G.getRow(gr++); r.getCell(1).value = overdue.length + ' overdue visit(s) carried forward - listed at the top of the first day sheet.'; r.getCell(1).font = { bold: true, color: { argb: 'FF9C0006' } }; }
+      const kr = G.getRow(gr++); kr.getCell(1).value = 'KEY:  W weekly, M monthly, Q quarterly, H half-yearly, A annual, S shutdown. Cell colour = service level.'; kr.getCell(1).font = { italic: true, size: 9 };
+      setup(G, lastG, '7:7');
+
+      // ---------- one sheet per day ----------
+      const COLS = [30, 15, 70, 11, 40, 20, 14];
+      const taskCols = ['MACHINE', 'TEAM / EST. HRS', 'MAINTENANCE TASKS', 'CHECKED\n(✓ / X)', 'REMARKS / FINDINGS', 'DONE BY (NAME)', 'TIME IN - OUT'];
+      const usedNames = new Set();
+      const writeDay = (ws, heading, list, odList) => {
+        COLS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+        letterhead(ws, title, 7);
+        const t = ws.getRow(6); t.getCell(1).value = heading; t.getCell(1).font = { bold: true, size: 18, color: { argb: NAVY } };
+        ws.getRow(6).height = 28;
+        const c1 = ws.getRow(6).getCell(5); c1.value = 'Supervisor: ____________________'; c1.font = { size: 11 };
+        hdr(ws, 8, taskCols);
+        let r = 9;
+        const block = (items, label, danger) => {
+          if (!items.length) return;
+          if (label) {
+            ws.mergeCells(r, 1, r, 7);
+            const b = ws.getRow(r); b.height = 22; const c = b.getCell(1); c.value = label;
+            c.font = { bold: true, size: 12, color: { argb: danger ? 'FF9C0006' : 'FFFFFFFF' } };
+            c.fill = solid(danger ? 'FFFFC7CE' : BAND); r++;
+          }
+          let lastGrp = null;
+          items.forEach(v => {
+            const gname = v.group + (v.location ? ' - ' + v.location : '');
+            if (gname !== lastGrp && !label) {
+              ws.mergeCells(r, 1, r, 7); const b = ws.getRow(r); b.height = 20;
+              b.getCell(1).value = gname.toUpperCase(); b.getCell(1).font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } }; b.getCell(1).fill = solid(BAND); r++;
+            }
+            lastGrp = gname;
+            const tasks = v.tasks.length ? v.tasks : ['Carry out the scheduled ' + v.levelName.toLowerCase() + ' service'];
+            const start = r;
+            tasks.concat(['Other / extra work done: ']).forEach((tk, i) => {
+              const row = ws.getRow(r++);
+              row.getCell(3).value = tk; row.getCell(4).value = '☐';
+              row.getCell(3).alignment = { wrapText: true, vertical: 'middle' }; row.getCell(3).font = { size: 12, italic: i === tasks.length };
+              row.getCell(4).alignment = { horizontal: 'center', vertical: 'middle' }; row.getCell(4).font = { size: 16 };
+              row.height = Math.max(20, Math.ceil(tk.length / 70) * 17 + 4);
+              for (let c = 1; c <= 7; c++) row.getCell(c).border = box;
+            });
+            // machine cell + merged blocks
+            ws.mergeCells(start, 1, r - 1, 1); ws.mergeCells(start, 2, r - 1, 2); ws.mergeCells(start, 5, r - 1, 5); ws.mergeCells(start, 6, r - 1, 6); ws.mergeCells(start, 7, r - 1, 7);
+            const a = ws.getRow(start).getCell(1);
+            a.value = v.machineName + '\n' + v.machineCode + '\nRef: PM-' + v.id + '  [' + v.level + ' ' + v.levelName + ']' + (v.dueDate !== (days[0] || v.dueDate) && danger ? '\nDue: ' + ddmmyyyy(v.dueDate) : '');
+            a.font = { bold: true, size: 12 }; a.alignment = { wrapText: true, vertical: 'middle' }; a.fill = solid(FILL[v.level] || 'FFFFFFFF');
+            const b = ws.getRow(start).getCell(2);
+            b.value = (v.team || '') + (v.hours ? '\n~' + v.hours + ' h' : ''); b.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' }; b.font = { size: 11 };
+            ws.getRow(start).getCell(7).value = '__:__ - __:__'; ws.getRow(start).getCell(7).alignment = { vertical: 'middle', horizontal: 'center' };
+            for (let rr = start; rr < r; rr++) for (let c = 1; c <= 7; c++) ws.getRow(rr).getCell(c).border = box;
+            const endRow = ws.getRow(r - 1); for (let c = 1; c <= 7; c++) endRow.getCell(c).border = { top: thin, left: thin, right: thin, bottom: heavy };
+          });
+        };
+        block(odList || [], 'OVERDUE - CARRIED FORWARD (do first)', true);
+        block(list, null, false);
+        if (!list.length && !(odList || []).length) { ws.getRow(r).getCell(1).value = 'No PM visits scheduled for this day.'; r++; }
+        r += 1;
+        ['Technician signature: ______________________      Date: ____________', 'Supervisor sign-off: ________________________      Date: ____________', 'Remember to log every completed visit as Preventive Maintenance in the CMMS (quote the Ref number).'].forEach((s, i) => { const c = ws.getRow(r++).getCell(1); c.value = s; c.font = { size: 11, italic: i === 2 }; });
+        setup(ws, 7, '8:8');
+      };
+      days.forEach((d, i) => {
+        const base = scope === 'shutdown' ? 'Day ' + (i + 1) : dow(d) + ' ' + d.slice(8) + '-' + d.slice(5, 7);
+        let nm = base, n = 2; while (usedNames.has(nm)) nm = base + ' (' + n++ + ')'; usedNames.add(nm);
+        const ws = wb.addWorksheet(nm);
+        const list = visits.filter(v => v.dueDate === d);
+        writeDay(ws, (scope === 'shutdown' ? 'DAY ' + (i + 1) + ' : ' : dow(d) + '  ') + ddmmyyyy(d), list, i === 0 ? overdue : []);
+      });
+
+      // ---------- crew sheet ----------
+      const C = wb.addWorksheet('Crew');
+      [6, 30, 16, 22, 26, 22].forEach((w, i) => { C.getColumn(i + 1).width = w; });
+      letterhead(C, 'MANPOWER / CREW ASSIGNMENT', 6);
+      hdr(C, 6, ['NO.', 'NAME', 'DESIGNATION', 'ASSIGNED MACHINE / AREA', 'DAYS ON DUTY', 'SIGNATURE']);
+      const n = Math.max(staff.length, 20);
+      for (let i = 0; i < n; i++) {
+        const row = C.getRow(7 + i); row.height = 22; const s = staff[i];
+        [i + 1, s ? s.name : '', s ? [s.title, s.discipline].filter(Boolean).join(' - ') : '', '', '', ''].forEach((x, j) => { const c = row.getCell(j + 1); c.value = x; c.border = box; c.alignment = { vertical: 'middle' }; });
+      }
+      setup(C, 6, '6:6');
+
+      const safe = String(org.name || 'CMMS').replace(/[^A-Za-z0-9]+/g, '_');
+      const tag = scope === 'shutdown' ? 'Shutdown_' + days[0].slice(0, 4) : scope === 'today' ? 'Today_' + from : from + '_to_' + to;
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${safe}_PM_Pack_${tag}.xlsx"`);
+      await wb.xlsx.write(res);
+      res.end();
+    } catch (e) { if (!res.headersSent) res.status(500).json({ error: 'Could not build work pack: ' + e.message }); else res.end(); }
+  });
+
   // distinct groups for the filter dropdown
   app.get('/api/pm/groups', requirePermission('view_machines'), async (req, res) => {
     try {
