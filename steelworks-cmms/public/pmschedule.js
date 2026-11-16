@@ -42,7 +42,7 @@
         groupsLoaded = true;
       } catch (e) { /* list still works without the group filter */ }
     }
-    if ($('pmImportBox')) $('pmImportBox').style.display = isManagement() ? '' : 'none';
+    if ($('pmImportBox')) $('pmImportBox').style.display = isManagement() ? 'block' : 'none';
     setTab(tab);
   };
 
@@ -285,7 +285,7 @@
     let cols = '<col class="pmc-c0">', hMon = '<th class="pmc-name" rowspan="3">Machine</th>', hWd = '', hDay = '', mSpan = [];
     for (let n = 0; n < nD; n++) {
       const dt = new Date(start + n * 86400000), wd = dt.getUTCDay(), iso = isoOf(n);
-      cols += `<col class="${(wd === 0 || wd === 6 ? 'pmc-wecol ' : '') + (iso === td ? 'pmc-nowcol' : '')}">`;
+      cols += wholeYear ? '<col>' : `<col class="${(wd === 0 || wd === 6 ? 'pmc-wecol ' : '') + (iso === td ? 'pmc-nowcol' : '')}">`;
       const cl = (wd === 0 || wd === 6 ? ' pmc-we' : '') + (iso === td ? ' pmc-now' : '');
       hWd += `<th class="pmc-wd${cl}">${WD[wd]}</th>`;
       hDay += `<th class="pmc-wk${cl}">${dt.getUTCDate()}</th>`;
@@ -308,7 +308,7 @@
       let tds = '', gap = 0;
       for (let n = 0; n < nD; n++) {
         const l = days[n];
-        if (!l) { gap++; continue; }
+        if (!l) { if (wholeYear) gap++; else tds += '<td class="pmc"></td>'; continue; }
         if (gap) { tds += `<td class="pmc" colspan="${gap}"></td>`; gap = 0; }
         perDay[n]++;
         l.sort((a, b) => RANK[b[2]] - RANK[a[2]]);
@@ -334,7 +334,7 @@
     const m = chartData.machines[+mi];
     const box = $('pmChDetail');
     const visits = m.v.filter(v => v[1] === iso);
-    box.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;"><div><b>${esc(m.code)} ${esc(m.name)}</b> <span class="hint" style="margin:0;">${esc(m.group)} &middot; ${esc(fmt(iso))}</span></div><button type="button" class="btn-ghost" data-pmact="closedetail">Close</button></div><div id="pmChCards" class="hint">Loading...</div>`;
+    box.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;"><div><b>${esc(m.code)} ${esc(m.name)}</b> <span class="hint" style="margin:0;">${esc(m.group)} &middot; ${esc(fmt(iso))}</span></div><span><button type="button" class="btn-ghost" data-pmact="pack" data-kind="day" data-date="${iso}">Print this day</button> <button type="button" class="btn-ghost" data-pmact="closedetail">Close</button></span></div><div id="pmChCards" class="hint">Loading...</div>`;
     box.style.display = ''; box.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     const onlyShutdown = visits.length && visits.every(v => v[2] === 'S');
     if (onlyShutdown) { $('pmChCards').innerHTML = 'This is the annual service in the plant shutdown. Tick it off or change it in the <b>Shutdown</b> tab.'; return; }
@@ -353,6 +353,29 @@
     window.location.href = '/api/pm/export?' + new URLSearchParams(Object.assign(y ? { year: y } : {}, g ? { group: g } : {})).toString();
   }
 
+  // ---------- printable work pack (Excel) ----------
+  function addDaysIso(iso, n) { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  function downloadPack(kind, extra) {
+    const td = localToday();
+    const qs = new URLSearchParams();
+    if (kind === 'shutdown') {
+      qs.set('scope', 'shutdown'); const y = $('pmShutYear') ? $('pmShutYear').value : ''; if (y) qs.set('year', y);
+    } else if (kind === 'day') {
+      qs.set('scope', 'range'); qs.set('from', extra); qs.set('to', extra);
+      const g = $('pmChGroup') ? $('pmChGroup').value : ''; if (g) qs.set('group', g);
+    } else {
+      const sc = $('pmScope').value;
+      if (sc === 'today' || sc === 'overdue') qs.set('scope', 'today');
+      else if (sc === 'week') qs.set('scope', 'week');
+      else if (sc === 'range') { qs.set('scope', 'range'); if ($('pmFrom').value) qs.set('from', $('pmFrom').value); if ($('pmTo').value) qs.set('to', $('pmTo').value); }
+      else { qs.set('scope', 'range'); qs.set('from', td); qs.set('to', addDaysIso(td, sc === 'month' ? 30 : sc === 'quarter' ? 90 : 92)); }
+      if ($('pmGroup').value) qs.set('group', $('pmGroup').value);
+      if ($('pmLevel').value) qs.set('level', $('pmLevel').value);
+      if ($('pmSearch').value.trim()) qs.set('q', $('pmSearch').value.trim());
+    }
+    window.location.href = '/api/pm/pack?' + qs.toString();
+  }
+
   // ---------- events ----------
   document.addEventListener('click', async (e) => {
     const t = e.target.closest('[data-pmact]');
@@ -362,6 +385,7 @@
     const act = t.dataset.pmact, id = parseInt(t.dataset.id, 10);
     try {
       if (act === 'xlsx') { downloadXlsx(); return; }
+      if (act === 'pack') { downloadPack(t.dataset.kind || 'due', t.dataset.date); return; }
       if (act === 'closedetail') { $('pmChDetail').style.display = 'none'; return; }
       if (act === 'log') { const r = cache[id]; chartData = null; if (r) await logPm(r); }
       else if (act === 'viewlog') { const r = cache[id]; if (r && r.logId && window.openLogDetail) { window._logDetailBackView = 'pm'; openLogDetail(r.logId); } }
